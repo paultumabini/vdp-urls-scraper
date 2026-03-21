@@ -1,0 +1,329 @@
+{% extends 'project/base.html'%}
+{% load static %}
+{% load crispy_forms_tags %}
+{% load crispy_forms_field %}
+{% load crispy_forms_tags %}
+{% load crispy_forms_utils %}
+{% load custom_filters %}
+{% load tz %}
+{% block title %}  Scrape Bucket - {{ sites.site_name | title}}{% endblock %}  <!--same as "object.site_name" -->
+{% block content %} 
+    <section class="dealer-details">          
+        <div class="target-sites-scrape-detail">    
+            <h3 align="left" class="ml-5 pt-3"> {{ request.resolver_match.url_name | str_split:'-' | str_join:' ' | title  }}s</h3>          
+            <div class="form-group site-detail-inputs" >
+                <legend class="site-info"></legend>  
+                <div class="site-detail-content"> 
+                    <div class="">          
+                        <fieldset class="site-details-fieldset sites" >
+                            <legend>{{ object.site_name }}</legend>
+                            <div class="site-details-info"> 
+                                <table class="site-details table">         
+                                    <tbody>  
+                                        <tr>                                            
+                                        <td >Status</td>
+                                        <td> 
+                                            <span class="status {{object.status|lower}}" style="transform: translateX(0);">
+                                                <span>{{ object.status|upper }}</span>
+                                            </span>
+                                            </td>
+                                        </tr>               
+                                        <tr>                                            
+                                            <td>Site URL</td>                                            
+                                            <td>
+                                                <a href="{{object.site_url}}" target="_blank"   title="{{object.site_url}}" class="darker__primary hover__effect">
+                                                {{object.site_url}} 
+                                                </a> 
+                                            </td>
+                                        </tr>
+                                        <tr>                                            
+                                            <td>Web Provider</td>
+                                            <td>{{ object.web_provider }}</td>
+                                        </tr>
+                                        <tr>                                            
+                                            <td>Site ID</td>
+                                            <td >{{ object.site_id }}</td>
+                                        </tr>
+                                        <tr>                                            
+                                            <td>Scrape ID</td>
+                                            <td >{% if object.feed_id %} {{ object.feed_id }} {% else %} -- none --{% endif %} </td>
+                                        </tr>
+                                        <tr>                                            
+                                            <td>Project</td>
+                                            <td>{{ object.project }}</td>
+                                        </tr>
+                                        <tr>                                            
+                                            <td>Date Created</td>
+                                            <td>{{ object.date_created | timezone:'US/Eastern' | date:'Y-m-d H:i:s'}}<span class="author__image-site-details" title="created by: {{ object.author }}"><img src="{{ object.author.profile.image.url }}"></span> </td>
+                                        </tr>
+                                        <tr>                                            
+                                            <td>Date Updated</td>
+                                            <td>{{ object.date_updated | timezone:'US/Eastern' | date:'Y-m-d H:i:s'}}<span class="author__image-site-details" title="updated by: {{ object.updated_by }}"><img src="{{ object.updated_by.profile.image.url }}"></span> 
+                                        </td>
+                                        </tr>   
+                                        <tr>                                            
+                                            <td>Notes</td>
+                                            <td><textarea class="notes" rows="3" placeholder="-- none --"cols ="30"disabled> {% if object.note %} {{object.note}} {% else %} -- none --{% endif %}</textarea></td>
+                                        </tr>                            
+                                    </tbody>
+                                </table>
+                            </div>                                                   
+                        </fieldset>
+                    </div> 
+                    <div class="">
+                    <fieldset class="site-details-fieldset items-scrape" >
+                        <legend>Items To Download</legend>                            
+                        <div class="scrape-info">
+                            <table class="scrape-table table">          
+                                <tbody>                                          
+                                    <tr>                                            
+                                    <td>Category</td>
+                                    <td><input class="form-check-input" type="checkbox" {% if object.category %} checked {% endif %}  onclick="return false" ></td>
+                                    <td>Price</td>
+                                    <td><input class="form-check-input" type="checkbox" {% if object.price  %} checked {% endif %}onclick="return false" ></td>                                       
+                                    </tr>
+                                    <tr>
+                                    <td>As a Unit</td>
+                                    <td><input class="form-check-input" type="checkbox" {% if object.unit  %} checked {% endif %}onclick="return false" ></td>
+                                    <td>Selling price:</td>
+                                    <td><input class="form-check-input" type="checkbox" {% if object.selling_price %} checked {% endif %} onclick="return false"></td>  
+                                    </tr>
+                                    <tr>
+                                    <td>Year</td>
+                                    <td><input class="form-check-input" type="checkbox" {% if object.year %} checked {% endif %} onclick="return false"></td>
+                                    <td>Rebate:</td>
+                                    <td><input class="form-check-input" type="checkbox" {% if object.rebate %} checked {% endif %} onclick="return false" ></td>  
+                                    </tr>
+                                    <tr>
+                                    <td>Make</td>
+                                    <td><input class="form-check-input" type="checkbox" {% if object.make %} checked {% endif %} onclick="return false"></td>
+                                    <td>Discount</td>
+                                    <td><input class="form-check-input" type="checkbox" {% if object.discount %} checked {% endif %} onclick="return false" ></td>                                            
+                                    </tr>
+                                    <tr>
+                                    <td>Model</td>
+                                    <td><input class="form-check-input" type="checkbox" {% if object.model %} checked {% endif %} onclick="return false" ></td>
+                                    <td>Images</td>
+                                    <td><input class="form-check-input" type="checkbox" {% if object.images %} checked {% endif %} onclick="return false"></td>                                         
+                                    </tr>
+                                    <tr> 
+                                    <td>Trim</td>
+                                    <td><input class="form-check-input" type="checkbox" {% if object.trim %} checked {% endif %} onclick="return false"></td>  
+                                    <td>Image count</td>
+                                    <td><input class="form-check-input" type="checkbox" {% if object.images_count %} checked {% endif %} onclick="return false"></td>                                            
+                                    </tr>
+                                    <tr>
+                                    <td>Stock#</td>
+                                    <td><input class="form-check-input" type="checkbox" {% if object.stock_number %} checked {% endif %} onclick="return false" ></td>
+                                    <td>Vehicle URL</td>
+                                    <td><input class="form-check-input" type="checkbox" {% if object.vehicle_url %} checked {% endif %} onclick="return false" ></td>  
+                                    </tr>
+                                    <tr>
+                                    <td>VIN</td>
+                                    <td><input class="form-check-input" type="checkbox" {% if object.vin %} checked {% endif %} onclick="return false"></td>  
+                                    </tr>
+                                    <tr> 
+                                    <td>Msrp</td>
+                                    <td><input class="form-check-input" type="checkbox" {% if object.msrp %} checked {% endif %} onclick="return false"></td> 
+                                    </tr>
+                                </tbody>
+                            </table>                             
+                        </div>                            
+                    </fieldset>
+                    </div>                        
+                    <div class="crawler-section"> 
+                        <fieldset class="site-details-fieldset crawler-stats" >                                                                                      
+                        <legend > Crawler Stats</legend>
+                                <div class="crawler-info"> 
+                                <table class="crawler-table table"> 
+                                    {% with object.spider_logs.all|sort_queryset:'-date_created' as log %}                                                                            
+                                    <tbody> 
+                                        <tr>                                            
+                                        <td>Spider:</td>                                         
+                                            <td>{{ log.first.spider_name  }}</td>                                           
+                                        </tr>                                         
+                                        <tr>                                            
+                                        <td>Items scraped</td>
+                                        <td>{{ log.first.items_scraped }}</td>
+                                        </tr>
+                                        <tr>                                            
+                                        <td>Items dropped</td>
+                                        <td>{{ log.first.items_dropped }}</td>
+                                        </tr>
+                                        <tr>                                            
+                                        <td>Request count</td>
+                                        <td>{{ log.first.request_count }}</td>
+                                        </tr>
+                                        <tr>                                            
+                                        <td>Status count(200)</td>
+                                        <td>{{ log.first.status_count_200 }}</td>
+                                        </tr>
+                                        <tr>                                            
+                                        <td>Start Timestamp</td>
+                                        <td>{{ log.first.start_timestamp | replace_if_empty:'' | convert_str_date | timezone:'US/Eastern' | date:'Y-m-d H:i:s' }}</td>
+                                        </tr>
+                                        <tr>                                            
+                                        <td>End Timestamp</td>
+                                        <td>{{ log.first.end_timestamp | replace_if_empty:'' |convert_str_date | timezone:'US/Eastern' | date:'Y-m-d H:i:s' }}</td>
+                                        </tr>
+                                        <tr>                                            
+                                        <td>Elapsed Time</td>
+                                        <td>{{ log.first.elapsed_time }}</td>
+                                        </tr>                                          
+                                        <tr>                                            
+                                        <td>Finish Reason</td>
+                                        <td>{{ log.first.finish_reason }}</td>
+                                        </tr>                                          
+                                    </tbody>
+                                    {% endwith %}
+                                </table>
+                            </div>
+                        </fieldset>    
+                    </div>                
+                </div>                            
+            </div>  
+            <div class="form-group btn-group__access">                   
+                    <a  class="btn btn-success btn__access"  href="{% url 'update-scrape' object.project object.site_id %}">    
+                        Edit Info
+                    </a>                    
+                    <a id="load-scrape-data" class="btn btn-success  btn__access">    
+                        View Scrapes
+                    </a>  
+                    {% now 'm-d-Y'  as today %}                 
+                    <a class="btn btn-success  btn__access download-btn2" href="{% url 'scrape-csv' object.project %}?target_id={{object.site_id}}">    
+                        <span class="left2">Download</span>
+                        <span class="right2"><i class="fa fa-file-csv"></i></span>
+                    </a>
+                    <a class="btn btn-danger  btn__access delete-btn2 openDeleteModal" data-site-id="{{object.site_id}}" data-site-name="{{object.site_name}}" data-entry-code="{{object.entry_code}}">    
+                        <span class="left2">Delete</span>
+                        <span class="right2"><i class="fa fa-trash"></i></span>
+                    </a>                           
+            </div>                             
+        </div>   
+            <!-- Scraped data table -->  
+    </section>
+<!-- Scrape Detail Modal -->
+<div class="modal fade" id="unitDetailModal" tabindex="-1" role="dialog" aria-labelledby="exampleModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl" role="document">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h6 class="modal-title" id="unitModalLabel">{{ object.site_name  }}</h6>
+          <button type="button" class="close close-btn" data-dismiss="modal" aria-label="Close">
+            <span aria-hidden="true">&times;</span>
+          </button>
+        </div>
+        <div class="modal-body">         
+        </div> 
+        <div class="modal-footer">            
+        </div>      
+      </div>
+    </div>
+  </div>
+{% endblock content%}
+{% block js %}    
+   
+    const filterResult = data => {
+        if('{{sites.scrapes.all.first.target_site_id}}'){
+            renderTableStructure(data.filter(d => d.target_site_id === '{{sites.scrapes.all.first.target_site_id}}'))                      
+        } else {
+            $('div').remove('.line__loader');  
+            raiseAlert('warning','No scrape available yet, please contact Paul!', false) 
+            runFuncs()
+        }
+    }  
+
+    const deleteItemModal = func => func('{{object.project}}','site-info')
+ 
+{% endblock %}
+
+
+ <!-- scroll down using jquery
+ $('.content-container').stop().animate({scrollTop: $('.content-container')[0].scrollHeight},1000 );
+  -->
+
+ <!-- <h5 align="left" class="ml-3 pt-3"> Scraped Data</h5> 
+        <div  class="target-sites">          
+            <table id="scrape-data-table" class="table  table-hover">    
+                <thead class="thead-light">
+                <tr>
+                    <th scope="col" style="width:3%">No</th>
+                    <th>Category</th>         
+                    <th>Year</th>
+                    <th>Make</th>                   
+                    <th>Model</th>
+                    <th>Trim</th>                    
+                    <th>As Unit</th>
+                    <th>Stock#</th>                    
+                    <th style="width:12%" >VIN</th>                   
+                    <th style="width:12%" >Vehicle URL</th>                   
+                    <th>MSRP</th>                   
+                    <th>Price</th>                   
+                    <th>Selling Price</th>                   
+                    <th>Rebates</th>                   
+                    <th>Image URLs</th>                   
+                    <th>Image Count</th>  
+                </tr> 
+                </thead>
+                <tbody class="" > 
+                {% for scrape in sites.scrapes.all %}  
+                <tr>                        
+                    <td scope="row" >{{ forloop.counter }}</td>                     
+                    <td class="scrape">
+                        <span title="{{scrape.category|default_if_none:''}}" >{{scrape.category|default_if_none:''}}</span>
+                    </td>                    
+                    <td class="scrape">
+                        <span title="{{scrape.year|default_if_none:''}}" >{{scrape.year|default_if_none:''}}</span>
+                    </td>
+                    <td class="scrape">
+                        <span title="{{scrape.make|default_if_none:''}}" >{{scrape.make|default_if_none:''}}</span>
+                    </td>
+                    <td class="scrape">
+                        <span title="{{scrape.model|default_if_none:''}}" >{{scrape.model|default_if_none:''}}</span>
+                    </td>
+                    <td class="scrape">
+                        <span title="{{scrape.trim|default_if_none:''}}" >{{scrape.trim|default_if_none:''}}</span>
+                    </td>
+                    <td class="scrape">
+                        <span title="{{scrape.unit|default_if_none:''}}" >{{scrape.unit|default_if_none:''}}</span>
+                    </td>
+                    <td class="scrape">
+                        <span title="{{scrape.stock_number|default_if_none:''}}" >{{scrape.stock_number|default_if_none:''}}</span>
+                    </td>
+                    <td class="scrape">
+                        <span title="{{scrape.vin|default_if_none:''}}" >{{scrape.vin|default_if_none:''}}</span>
+                    </td>                             
+                    <td class=" scrape td-effect td-overflow">  
+                        <span >                    
+                        <a href=" {{scrape.vehicle_url|default_if_none:''}}" target="_blank"   title="{{scrape.vehicle_url|default_if_none:''}}" class="lighter__primary hover__effect">
+                            {{scrape.vehicle_url|default_if_none:''}} 
+                        </a>  
+                    </span>                       
+                    </td>
+                    <td class="scrape">
+                        <span title="{{scrape.msrp|default_if_none:''}}" >{{scrape.msrp|default_if_none:''}}</span>
+                    </td>   
+                    <td class="scrape">
+                        <span title="{{scrape.price|default_if_none:''}}" >{{scrape.price|default_if_none:''}}</span>
+                    </td> 
+                    <td>
+                        <span title="{{scrape.selling_price|default_if_none:''}}" >{{scrape.selling_price|default_if_none:''}}</span>
+                    </td> 
+                    <td class="scrape">
+                        <span title="{{scrape.rebate|default_if_none:''}}" >{{scrape.rebate|default_if_none:''}}</span>
+                    </td> 
+                    <td class="scrape">
+                        <span >
+                            <a href=" " target="_blank"   title="{{scrape.image_urls|default_if_none:''}}" class="darker__primary hover__effect">
+                            List
+                            </a>  
+                        </span>
+                    </td>
+                    <td class="scrape">
+                        <span title="{{scrape.images_count|default_if_none:''}}" >{{scrape.images_count|default_if_none:''}}</span>
+                    </td>
+                                    
+                </tr>
+                {% endfor%}           
+                </tbody >       
+            </table>          
+        </div>     -->

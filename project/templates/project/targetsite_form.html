@@ -1,0 +1,122 @@
+{% extends 'project/base.html'%}
+{% load static %}
+{% load crispy_forms_tags %}
+{% load crispy_forms_field %}
+{% load crispy_forms_tags %}
+{% load crispy_forms_utils %}
+{% load custom_filters %}
+
+
+{% block title %}  Scrape Bucket - {{ request.resolver_match.url_name | title}}{% endblock %}  <!--same as "object.site_name" -->
+{% block content %} 
+<section class="dealer-details">   
+    <div class="target-sites-scrape-new pt-3 pb-3">
+        <h3 align="left" class="ml-3 pt-3"> {{ request.resolver_match.url_name | str_split:'-' | str_join:' ' | title }}</h3>  
+        <form method="POST" enctype="multipart/form-data" novalidate>     
+            {% csrf_token %}  
+                <fieldset class="form-group mr-4 ml-4" >
+                    <legend class=" profile-info"> Information </legend>  
+                        <div class="new-scrape-content"> 
+                            <div class="new-scrape-inputs col-6"> 
+                                <div class="form-input-div">
+                                    {{ form.site_name|as_crispy_field }}
+                                </div>
+                                <div class="form-input-div">
+                                    {{ form.site_url|as_crispy_field }}  
+                                </div>
+                                <div class="form-input-div">
+                                    {{ form.web_provider|as_crispy_field }}  
+                                </div>
+                                <div class="form-input-div">
+                                    {{ form.project|as_crispy_field }}
+                                </div>                                                                 
+                                <div class="form-row">
+                                    <div class="form-group col-md-6">
+                                      <label for="id_site_id">{{form.site_id.label}} <i data-html="true" class="fa fa-question-circle fa-1x red-tooltip" data-placement="top" data-toggle="tooltip" data-original-title="Example: <br> url: <i>https://www.google.com</i> <br> domain_name: <i>google</i>  "></i></label>
+                                      {{form.site_id}}
+                                      {% if form.errors %}
+                                      <strong> {{ form.errors.site_id }}</strong>
+                                      {% endif %} 
+                                    </div>
+                                    <div class="form-group col-md-6">
+                                      {{form.feed_id.label_tag}}
+                                      {{form.feed_id}}
+                                    </div>
+                                </div>
+                                <div class="form-input-div">
+                                    {{ form.status|as_crispy_field }} 
+                                </div>                       
+                            </div>    
+                                <div class="ml-3">                                                            
+                                    <div class="new-scrape-legend">
+                                        Items to download:
+                                    </div>     
+                                    <div class="new-scrape-checkboxes">  
+                                        <div> 
+                                            {{ form.condition|as_crispy_field }}
+                                            {{ form.unit|as_crispy_field }}
+                                            {{ form.year|as_crispy_field }}
+                                            {{ form.make|as_crispy_field }}
+                                            {{ form.model|as_crispy_field }}
+                                            {{ form.trim|as_crispy_field }}
+                                            {{ form.stock_number|as_crispy_field }}   
+                                        </div>
+                                        <div> 
+                                            {{ form.vin|as_crispy_field }}
+                                            {{ form.vehicle_url|as_crispy_field }}
+                                            {{ form.msrp|as_crispy_field }}
+                                            {{ form.price|as_crispy_field }}
+                                            {{ form.selling_price|as_crispy_field }}
+                                            {{ form.rebate|as_crispy_field }}
+                                            {{ form.discount|as_crispy_field }}
+                                            
+                                        </div>
+                                        <div>                                        
+                                            {{ form.images|as_crispy_field }}
+                                            {{ form.images_count|as_crispy_field }}
+                                        </div>                                                                                           
+                                    </div>  
+                                <div class="check-uncheck__all">                                   
+                                    <i class="fa fa-check-square-o check__all" aria-hidden="true" data-placement="top" data-toggle="tooltip" data-original-title="Select all">  </i>
+                                    <i class="fa fa-square-o uncheck__all" aria-hidden="true" data-placement="top" data-toggle="tooltip" data-original-title="Unselect all"></i>
+                                </div>                                                            
+                                <div class=""> 
+                                    {{ form.note|as_crispy_field }}
+                                </div>                           
+                            </div>       
+                        </div>                          
+                              
+                </fieldset>                  
+                <div class="form-group btn-group__access" style="justify-content:flex-start">
+                 {% with request.resolver_match.url_name as url_name %} 
+                   {% if url_name == 'new-scrape'%} 
+                         <button class="btn btn-success btn__accessb btn-sm" type="submit" >Submit</button>  
+                    {% else %}
+                         <button class="btn btn-success btn__access btn-sm "type="submit">Save</button>
+                         <a class="btn btn-secondary btn__accessb btn-sm" href="{% url 'site-detail' targetsite.project targetsite.pk%}"> Back </a>  
+                   {% endif %}  
+                {% endwith %}    
+                </div>         
+        </form>      
+    </div>     
+</section>
+{% endblock content%}
+
+{% block js %} 
+// Add datalist
+const status = document.getElementById('div_id_status');
+const domain = document.getElementById('id_site_id')
+
+// hide status if new-scrape
+if('{{request.resolver_match.url_name}}' === 'new-scrape' || '{{request.user.is_superuser}}' ==='False') status.style.display ='none'
+// add input validation indicator
+if('{{form.errors.site_id}}') domain.classList.add('is-invalid') 
+ 
+addProviderDataList(
+ addAimDealerList,
+ '/web-provider-json/',
+ '/aim-dealer-provider-json/'
+);
+
+ 
+{% endblock %}   

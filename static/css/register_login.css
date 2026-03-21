@@ -1,0 +1,383 @@
+* {
+  padding: 0;
+  margin: 0;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  box-sizing: border-box;
+}
+
+.login-container,
+.register-container {
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  justify-content: center;
+}
+
+.login-container {
+  overflow: hidden;
+}
+
+.register-container {
+  overflow-y: scroll;
+  overflow-x: hidden;
+}
+
+.error-msg-box,
+.success-msg-box {
+  position: absolute;
+  display: flex;
+  justify-content: center;
+  top: 1.5rem;
+  width: 400px;
+  animation: fade-in-error 0.3s ease-in 1;
+}
+
+.error-msg {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: #ff0000;
+  border: 1px solid #ff0000;
+  padding: 1.5rem 2rem;
+  /* height: 7rem; */
+  width: 28rem;
+  box-shadow: 0 4px 20px 0px rgb(0 0 0 / 14%), 0 7px 10px -5px rgb(244 67 54);
+}
+
+.alert-success.sign__up {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: #008000;
+  border: 1px solid #008000;
+  padding: 1.5rem 2rem;
+  /* height: 7rem; */
+  width: 28rem;
+  box-shadow: 0 4px 20px 0px rgb(0 0 0 / 14%), 0 7px 10px -5px rgb(76 175 80 / 40%);
+}
+
+.error-msg > i.fas.fa-exclamation-circle,
+.alert-success.sign__up > i.fas.fa-check-circle {
+  position: absolute;
+  left: 15px;
+  font-size: 1.2rem;
+}
+
+button.close {
+  position: absolute;
+  right: 15px;
+  top: 10px;
+}
+
+.login-content {
+  display: flex;
+  width: 100%;
+  height: 100vh;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  -webkit-box-pack: center;
+  -webkit-box-align: center;
+}
+
+form {
+  width: 25rem;
+  overflow: auto;
+  padding: 2.5rem;
+  border-radius: 0.3rem;
+  box-shadow: 0px 2px 30px 1px rgb(0 0 0 / 20%);
+}
+.form-group {
+  margin-bottom: 0;
+}
+
+.login-content img {
+  height: 80px;
+  margin: 1.5rem;
+}
+
+.login-content h2 {
+  margin: 1.5rem 0;
+  color: #1d4354;
+  font-size: 1.5rem;
+  font-weight: 300;
+}
+
+.login-content .input-div {
+  position: relative;
+  display: grid;
+  grid-template-columns: 7% 93%;
+  margin: 1rem 0;
+  padding: 4px 0;
+  border-bottom: 2px solid #d9d9d9;
+}
+
+.login-content .input-div.one {
+  margin-top: 0;
+}
+
+.i {
+  color: #acacac;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.i i {
+  transition: 0.3s;
+}
+
+span.eyes {
+  position: absolute;
+  right: 0;
+  color: #bab4c2;
+}
+
+i.fa-eye,
+i.fa-eye-slash {
+  position: absolute;
+  right: 2px;
+  top: 15px;
+  color: #bab4c2;
+}
+
+i.fa-eye:hover,
+i.fa-eye-slash:hover {
+  color: #9e9e9e;
+  cursor: pointer;
+}
+
+i.fa-eye-slash {
+  visibility: hidden;
+}
+
+input#show-pass {
+  accent-color: #14a800;
+}
+
+.text-password {
+  color: #6c757d;
+  text-align: left;
+  margin: 10px 5px;
+}
+
+.input-div > div {
+  position: relative;
+  height: 45px;
+}
+
+.input-div > div > h5 {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #7a7a7a;
+  font-size: 1rem;
+  font-weight: 400;
+  transition: 0.3s;
+}
+
+.input-div:before,
+.input-div:after {
+  content: '';
+  position: absolute;
+  bottom: -2px;
+  width: 0%;
+  height: 2px;
+  background-color: #14a800;
+  transition: 0.3s;
+}
+
+.input-div:before {
+  right: 50%;
+}
+
+.input-div:after {
+  left: 50%;
+}
+
+.input-div.focus:before,
+.input-div.focus:after {
+  width: 50%;
+}
+
+.input-div.focus:before {
+  width: 50%;
+}
+
+.input-div.focus > div > h5 {
+  top: -5px;
+  font-size: 0.8rem;
+}
+
+.input-div.focus > .i > i {
+  color: #14a800;
+}
+
+.input-div > div > input {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  border: none;
+  outline: none;
+  background: none;
+  padding: 0.5rem 0.7rem;
+  font-size: 1rem;
+  font-weight: 500;
+  color: #555;
+}
+
+.input-div.pass {
+  margin-bottom: 4px;
+}
+
+a {
+  display: inherit;
+  text-align: right;
+  text-decoration: none;
+  color: #999;
+  font-size: 0.9rem;
+  transition: 0.3s;
+}
+
+a.password-reset {
+  float: right;
+}
+
+a:hover {
+  color: #14a800;
+}
+
+.btn {
+  display: block;
+  width: 100%;
+  height: 3rem;
+  border-radius: 1.5rem;
+  outline: none;
+  border: none;
+  background-image: linear-gradient(to right, #29b817, #22ca0b, #14a800);
+  background-size: 200%;
+  font-size: 1rem;
+  color: #fff;
+  font-family: 'Poppins', sans-serif;
+  margin: 3.5rem 0 2rem;
+  cursor: pointer;
+  transition: 0.5s;
+}
+.btn:hover {
+  background-position: right;
+}
+
+.btn:not(:disabled):not(.disabled).active,
+.btn:not(:disabled):not(.disabled):active {
+  background-image: linear-gradient(to right, #29b817, #22ca0b, #14a800);
+}
+
+.sign-up {
+  text-align: left;
+}
+
+@media screen and (max-width: 1050px) {
+  .login-container,
+  .register-container {
+    grid-gap: 5rem;
+  }
+}
+
+@media screen and (max-width: 1000px) {
+  form {
+    width: 24rem;
+  }
+
+  .login-content h2 {
+    font-size: 1.3rem;
+    margin: 1.5rem 0;
+    transition: all 200ms ease-in-out;
+  }
+
+  .img img {
+    width: 400px;
+  }
+}
+
+@media screen and (max-width: 900px) {
+  .login-container,
+  .register-container {
+    grid-template-columns: 1fr;
+  }
+
+  .img {
+    display: none;
+  }
+
+  .login-content img {
+    height: 70px;
+    margin: 1.5rem;
+    transition: all 200ms ease-in-out;
+  }
+
+  .wave {
+    display: none;
+  }
+
+  .login-content {
+    justify-content: center;
+  }
+}
+
+/* animation */
+
+@-webkit-keyframes fade-in-error {
+  0% {
+    opacity: 0;
+    transform: translateY(-20rem);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(1.5rem);
+  }
+}
+
+@keyframes fade-in-error {
+  0% {
+    opacity: 0;
+    transform: translateY(-20rem);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(1.5rem);
+  }
+}
+
+@-webkit-keyframes scale-up-center {
+  0% {
+    -webkit-transform: scale(0.5);
+    transform: scale(0.5);
+  }
+  100% {
+    -webkit-transform: scale(1);
+    transform: scale(1);
+  }
+}
+@keyframes scale-up-center {
+  0% {
+    -webkit-transform: scale(0.5);
+    transform: scale(0.5);
+  }
+  100% {
+    -webkit-transform: scale(1);
+    transform: scale(1);
+  }
+}

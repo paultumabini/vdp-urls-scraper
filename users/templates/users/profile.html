@@ -1,0 +1,61 @@
+{% extends "project/base.html"  %} 
+{% load crispy_forms_tags %}
+{% block content %}  
+    <div class="profile-wrapper">
+        <div class="profile-cover">            
+        </div>
+        <div class="profile-content-section display-image">
+            <form method="POST" enctype="multipart/form-data">     
+                {% csrf_token %}       
+                <div id="display-image">                
+                    <img class="account-img" src="{{ user.profile.image.url }}" id="preview-image">
+                    <div class="image-icon-wrapper">
+                        <span class="image-icon" for="id_image"> <label for="id_image" class="fa fa-camera"></label> </span>
+                        {{ profile_form.image }}
+                    </div>  
+                    <div class="media-body">                        
+                        <h3 class="account-heading">{{ user.username|title }}</h3>
+                        <p class="text-secondary">{{ user.email }}</p>
+                    </div>
+                </div>
+                 <div class="profile mr-4 ml-4">
+                        <fieldset >
+                            <legend class=" profile-info">Profile Info</legend> 
+                            <div class="form-group profile-content" >
+                                <div class="form-group profile col-md-5">
+                                    <label for="exampleInputEmail1">Username</label>
+                                    <input type="text" class="form-control form-control-sm text-muted" name="username" id="id_username" value="{{ user.username }}" required>
+                                </div>
+                                <div class="form-group  profile col-md-5">
+                                    <label for="exampleInputPassword1">Email</label>
+                                    <input type="email" class="form-control  form-control-sm text-muted" name="email" id="id_email" value="{{ user.email }}" required>  
+                                </div>   
+                            </div>                 
+                        </fieldset>
+                        <div class="form-group">
+                            <button class="btn btn-success btn-sm" type="submit">Update</button>
+                        </div>
+                 </div>
+            </form>
+        </div>
+    </div> 
+
+    <script>
+        const inputImage = document.querySelector('#id_image');
+        const displayImage = document.querySelector('#display-image');
+        const previewImage = displayImage.querySelector('#preview-image');
+       
+        inputImage.addEventListener('change', function() {
+            const file = this.files[0];           
+            if (file) {
+                const reader = new FileReader();               
+                reader.addEventListener('load', function(){                    
+                   previewImage.setAttribute('src', this.result)
+                })
+                reader.readAsDataURL(file)
+            }           
+        })
+        
+        
+    </script>
+{% endblock content %}

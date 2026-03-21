@@ -1,0 +1,84 @@
+{% extends 'project/base.html'%}
+{% load static %}
+{% load crispy_forms_tags %}
+{% load crispy_forms_field %}
+{% load crispy_forms_tags %}
+{% load crispy_forms_utils %}
+{% load custom_filters %}
+{% load tz %}
+{% block title %}  Scrape Bucket - Dashboard{% endblock %} 
+{% block content %}
+
+    <!-- Section 1 -->
+    <section class="section-one">
+        <div class="card">
+          <div class="card-icon">
+            <i class="fa fa-clipboard"></i>
+          </div>
+          <div>
+            <h2 class="value" data-target="{{ project.count}}">0</h2>
+           <p> Project</p>
+          </div> 
+        </div>
+        <div class="card">
+          <div class="card-icon">
+            <i class="fa fa-link"></i>
+          </div>
+          <div>
+            <h2 class="value" data-target="{{provider | get_field_values:'site_name'| length }}">0</h2>
+            <p> Sites </p>
+          </div>
+        </div>
+        <div class="card ">
+          <div class="card-icon">
+            <i class="fa fa-tasks"></i>
+          </div>
+            <div>
+            <h2 class="value percent" data-target="{{provider | get_field_values:'web_provider'| length }}">0</h2>
+            <p> Templates</p>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-icon">
+            <i class="fa fa-database"></i>
+          </div>
+            <div>
+            <h2 class="value percent" data-target="{{total_scrapes | default_if_none:'0'}}">0</h2>
+            <p> Scraped</p>
+          </div>
+        </div>
+    </section>
+      <!-- Section 2 -->
+       <section class="section-two">
+          <div class="card card-chart chart-wrapper">
+           <!--  Chart A  -->
+           <div class="chart-A"> 
+              <canvas id="chartA__canvas" width="400" height="350"></canvas>
+            </div>        
+          </div>    
+          <div class="card card-chart chart-wrapper">
+            <!-- Chart B-C-->
+            <div class="chart-B-C"> 
+                <div class="chart-B"> 
+                    <canvas id="chartB__canvas" width="400" height="225"></canvas>
+                </div>
+                <div class="chart-C"> 
+                    <canvas id="chartC__canvas" width="400" height="125"></canvas>
+                </div>
+            </div>
+          </div>
+       </section>
+       
+        <!-- flash Messages -->
+        {% if messages %}
+        {% for message in messages %}
+            <div class="alert alert-{{ message.level_tag }} {{ message.extra_tags }}">
+                {{ message }}
+                </div>              
+        {% endfor %}
+        {% endif %}
+{% endblock content%}
+{% block js %}  
+    getSpiderLogs();
+{% endblock %}
+
