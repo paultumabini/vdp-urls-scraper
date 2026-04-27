@@ -4,6 +4,25 @@ Django application for managing dealer **vehicle detail page (VDP)** scraping: t
 
 ![Dashboard: projects, sites, templates, YTD scrapes, and 15-day activity](docs/dashboard-screenshot.png)
 
+## Product screenshots
+
+### Admin: spider logs
+
+![Admin spider logs table view](docs/spider-logs.png)
+
+### Project: scraped data table
+
+![Scraped data table for a dealer site](docs/site-scrape-table.png)
+
+### Project: image preview modal
+
+![Vehicle image modal from a scrape row](docs/site-scrape-images-modal.png)
+
+### API examples (Postman and CLI)
+
+![API request/response example in Postman](docs/api-postman-example.png)
+![API response example using curl/httpie](docs/api-curl-httpie-example.png)
+
 ## Features
 
 - **Web dashboard** — KPIs (projects, sites, templates, scraped item counts), YTD template breakdown, recent scrape activity, and scraper elapsed-time trends.

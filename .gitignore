@@ -154,3 +154,4 @@ cython_debug/
 # additional
 /logs
 /output_csv
+fixtures/*
