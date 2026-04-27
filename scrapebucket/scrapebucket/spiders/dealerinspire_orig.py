@@ -39,8 +39,11 @@ class DealerinspireSpider(scrapy.Spider):
 
     def parse(self, response):
         for unit in response.xpath('//div[@class="hit"]'):
+            href = unit.xpath('.//a/@href').get()
+            if not href:
+                continue
             yield SeleniumRequest(
-                url=unit.xpath('.//a/@href').get(),
+                url=href,
                 callback=self.parse_data,
                 meta={'unit': unit, 'page': response.url},
             )
@@ -73,8 +76,11 @@ class DealerinspireSpider(scrapy.Spider):
         loader.add_value('stock_number', stock_number)
         loader.add_xpath('vin', './/a/@href')
         loader.add_xpath('vehicle_url', './/a/@href')
-        loader.add_value('image_urls', '|'.join([*images[0], *images[1]]))
-        loader.add_value('images_count', len([*images[0], *images[1]]))
+        src_imgs = images[0] if images else []
+        data_imgs = images[1] if len(images) > 1 else []
+        merged = [*(src_imgs or []), *(data_imgs or [])]
+        loader.add_value('image_urls', '|'.join(merged))
+        loader.add_value('images_count', len(merged))
         loader.add_value('page', page)
         loader.add_value('domain', self.domain_name)
 

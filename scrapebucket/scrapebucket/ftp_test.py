@@ -1,49 +1,78 @@
-import ftplib
+"""
+Ad-hoc FTP upload smoke test for VDP CSV files.
 
-ftp = ftplib.FTP()
-host = "aim-control.com"
-port = 21
-ftp.connect(host, port)
-print(ftp.getwelcome())
-try:
-    print("Logged in...")
-    ftp.login('gen_ftp', 'G3Nftp!')
-except:
-    "failed to login"
+Uses the same environment variables as ``VdpUrlsMiddleWare`` in ``middlewares.py``;
+do not commit real credentials. Example::
 
-    # send or create csv in ftp server
-import io
-from ftplib import FTP
+    export AIM_FTP_HOST=ftp.example.com
+    export AIM_FTP_USER=...
+    export AIM_FTP_PASS=...
+    python -m scrapebucket.ftp_test
+"""
 
-csvfile = io.StringIO()
+from __future__ import annotations
+
 import csv
+import io
+import os
+import sys
+from ftplib import FTP, error_perm
 
-fieldnames = ['VIN', 'VDP URLS']
-writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
 
-writer.writeheader()
-writer.writerow(
-    {
-        'VIN': '3C6UR5TL2KG517011',
-        'VDP URLS': 'https://www.macdonaldbuickgmc.com/inventory/certified-used-2019-ram-2500-limited-certified-leather-seats-610-bw-4x4-crew-cab-3c6ur5tl2kg517011/',
-    }
-)
-writer.writerow(
-    {
-        'VIN': '1GTUUCED3NZ581385',
-        'VDP URLS': 'https://www.macdonaldbuickgmc.com/inventory/new-2022-gmc-sierra-1500-elevation-452-bw-4x4-crew-cab-1gtuuced3nz581385/',
-    }
-)
-writer.writerow(
-    {
-        'VIN': '3C6UR5TL2KG517011',
-        'VDP URLS': 'https://www.macdonaldbuickgmc.com/inventory/new-2022-gmc-sierra-1500-elevation-452-bw-4x4-crew-cab-1gtuuced3nz597201/',
-    }
-)
+def _sample_rows() -> list[dict[str, str]]:
+    """Placeholder rows for integration testing only."""
+    return [
+        {
+            'VIN': '3C6UR5TL2KG517011',
+            'VDP URLS': 'https://example.com/inventory/used-vehicle-3c6ur5tl2kg517011/',
+        },
+        {
+            'VIN': '1GTUUCED3NZ581385',
+            'VDP URLS': 'https://example.com/inventory/new-vehicle-1gtuuced3nz581385/',
+        },
+    ]
 
-ftp = FTP('aim-admin.com')
-ftp.login('gen_ftp', 'G3Nftp!')
-# flo.seek(0)
-# ftp.set_pasv(False)
-ftp.storbinary('STOR TEST_VDP_URLS.csv', io.BytesIO(csvfile.getvalue().encode()))
-print("SENT...")
+
+def main() -> int:
+    host = os.environ.get('AIM_FTP_HOST')
+    user = os.environ.get('AIM_FTP_USER')
+    password = os.environ.get('AIM_FTP_PASS')
+    if not all((host, user, password)):
+        print(
+            'Missing AIM_FTP_HOST / AIM_FTP_USER / AIM_FTP_PASS '
+            '(see middlewares.VdpUrlsMiddleWare).',
+            file=sys.stderr,
+        )
+        return 1
+
+    remote_name = os.environ.get('AIM_FTP_TEST_FILENAME', 'TEST_VDP_URLS.csv')
+
+    buffer = io.StringIO()
+    fieldnames = ['VIN', 'VDP URLS']
+    writer = csv.DictWriter(buffer, fieldnames=fieldnames)
+    writer.writeheader()
+    for row in _sample_rows():
+        writer.writerow(row)
+
+    payload = io.BytesIO(buffer.getvalue().encode('utf-8'))
+
+    ftp = FTP()
+    try:
+        ftp.connect(host, int(os.environ.get('AIM_FTP_PORT', '21')))
+        ftp.login(user, password)
+        ftp.storbinary(f'STOR {remote_name}', payload)
+    except (OSError, error_perm) as exc:
+        print(f'FTP failed: {exc}', file=sys.stderr)
+        return 1
+    finally:
+        try:
+            ftp.quit()
+        except Exception:
+            ftp.close()
+
+    print(f'Uploaded {remote_name!r} to {host!r}.')
+    return 0
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

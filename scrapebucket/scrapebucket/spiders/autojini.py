@@ -6,6 +6,7 @@ from scrapy.linkextractors import LinkExtractor
 from scrapy.loader import ItemLoader
 
 from ..items import ScrapebucketItem
+from ..spider_helpers.response_json import loads_response_body
 
 
 class AutojiniSpider(scrapy.Spider):
@@ -30,7 +31,9 @@ class AutojiniSpider(scrapy.Spider):
             )
 
     def parse(self, response):
-        unit_urls = LinkExtractor(restrict_xpaths='//div[@class="productImage"]/a[2]').extract_links(response)
+        unit_urls = LinkExtractor(
+            restrict_xpaths='//div[@class="productImage"]/a[2]'
+        ).extract_links(response)
         for url in unit_urls:
             yield scrapy.Request(
                 url=f'{url.url}',
@@ -38,15 +41,20 @@ class AutojiniSpider(scrapy.Spider):
             )
 
     def parse_api(self, response):
-        access_url = 'https://public-api.buyerbridge.io/v1/accounts/3f301d49-919f-49bd-908b-914b735cc716/products/search'
+        access_url = (
+            'https://public-api.buyerbridge.io/v1/accounts/'
+            '3f301d49-919f-49bd-908b-914b735cc716/products/search'
+        )
         vin = response.xpath('//div/@vin').get()
+        if not vin:
+            return
 
         payload = {
-            "queries": [
+            'queries': [
                 {
-                    "field": "vin",
-                    "value": [f"{vin}", f"{vin}", f"{vin}"],
-                    "match_type": "term",
+                    'field': 'vin',
+                    'value': [vin, vin, vin],
+                    'match_type': 'term',
                 },
             ],
         }
@@ -67,26 +75,21 @@ class AutojiniSpider(scrapy.Spider):
         )
 
     def parse_items(self, response):
-        res_json = json.loads(response.body)
-        data = res_json.get('data')[0]
+        res_json = loads_response_body(
+            response.body, url=response.url, label=self.name
+        )
+        if not res_json:
+            return
 
+        data_list = res_json.get('data') or []
+        if not data_list:
+            return
+
+        data = data_list[0]
         loader = ItemLoader(item=ScrapebucketItem())
 
         loader.add_value('vin', data.get('vin'))
         loader.add_value('vehicle_url', data.get('vdp_url'))
-
-        # loader.add_value('category', 'Used' if data.get('used') else 'New')
-        # loader.add_value('year', data.get('year'))
-        # loader.add_value('make', data.get('make_name'))
-        # loader.add_value('model', data.get('model_name'))
-        # loader.add_value('trim', data.get('trim_name'))
-        # loader.add_value('stock_number', data.get('stock_number'))
-        # loader.add_value('msrp', data.get('msrp'))
-        # loader.add_value('price', data.get('price'))
-        # loader.add_value('selling_price', data.get('sale_price'))
-        # loader.add_value('image_urls', data.get('images'))
-        # loader.add_value('images_count', len(data.get('images')))
-
         loader.add_value('domain', self.domain_name)
 
         yield loader.load_item()

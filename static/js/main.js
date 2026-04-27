@@ -173,7 +173,10 @@ function confirmDeleteMessage(project, site) {
     console.log('TAI', $(this).data());
 
     $('#site-to-delete').text(siteName);
-    $('#delete-form').attr('action', `/project/${project}/${site}/${siteId}/delete`);
+    $('#delete-form').attr(
+      'action',
+      `/project/${project}/${site}/${siteId}/delete/`
+    );
   });
 }
 

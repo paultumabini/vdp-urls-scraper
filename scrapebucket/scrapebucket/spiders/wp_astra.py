@@ -1,3 +1,5 @@
+"""Astra-based WP inventory: shallow vehicle grid with verbose meta rows for stock/VIN."""
+
 from urllib.parse import urlparse
 
 import scrapy
@@ -9,8 +11,13 @@ from ..items import ScrapebucketItem
 
 
 class WpAstraSpider(CrawlSpider):
+    """
+    Listing cards link from ``/vehicles``; specs on VDP use label/value pairs with brittle XPath.
+
+    ``meta['page']`` stores the listing URL that led to this VDP (for auditing pagination).
+    """
+
     name = 'wp_astra'
-    # allowed_domains = ['drivenation.ca']
     domain_name = ''
 
     custom_settings = {
@@ -21,7 +28,6 @@ class WpAstraSpider(CrawlSpider):
         self.domain_name = '.'.join(urlparse(self.url).netloc.split('.')[-2:])
         yield scrapy.Request(url=f'{self.url}vehicles')
 
-    # vehicle urls
     link_extractor = LinkExtractor(restrict_xpaths='//div/h2/a')
 
     rules = (
@@ -29,19 +35,25 @@ class WpAstraSpider(CrawlSpider):
             link_extractor,
             callback='parse_item',
             follow=True,
-            process_request=lambda req, res: (req.meta.update({'page': res.url}), req)[1],
+            process_request='carry_listing_url',
         ),
     )
 
-    def parse_item(self, response):
-        page = response.meta['page']
+    def carry_listing_url(self, request, response):
+        request.meta['page'] = response.url
+        return request
 
+    def parse_item(self, response):
         loader = ItemLoader(item=ScrapebucketItem(), selector=response)
         loader.add_value('vehicle_url', response.url)
+        # Theme encodes "Stock Number" / "VIN" labels; following axis reaches the value cell.
         loader.add_xpath(
-            'stock_number', '//div[contains(text()[normalize-space()],"Stock Number")]/ancestor::node()[3]/following-sibling::div/div/div/div/text()'
+            'stock_number',
+            '//div[contains(text()[normalize-space()],"Stock Number")]/ancestor::node()[3]/following-sibling::div/div/div/div/text()',
         )
-        loader.add_xpath('vin', '//div[contains(text()[normalize-space()],"VIN")]/ancestor::node()[3]/following-sibling::div/div/div/div/text()')
-
+        loader.add_xpath(
+            'vin',
+            '//div[contains(text()[normalize-space()],"VIN")]/ancestor::node()[3]/following-sibling::div/div/div/div/text()',
+        )
         loader.add_value('domain', self.domain_name)
         yield loader.load_item()

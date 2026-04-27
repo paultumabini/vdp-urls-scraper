@@ -1,4 +1,7 @@
-# This package will contain the spiders of your Scrapy project
-#
-# Please refer to the documentation for information on how to create and manage
-# your spiders.
+"""
+Scrapy spiders for dealer inventory — one module per platform or WordPress theme.
+
+Crawl jobs inject ``url`` (and sometimes middleware-specific options). Shared utilities
+live under ``spider_helpers``; code that imports Django models must call
+``django_setup.ensure_django()`` before ORM use (see ``url_qs`` and similar).
+"""

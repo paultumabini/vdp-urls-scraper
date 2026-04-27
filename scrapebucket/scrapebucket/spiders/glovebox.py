@@ -1,4 +1,3 @@
-import json
 from urllib.parse import urlparse
 
 import scrapy
@@ -6,6 +5,7 @@ from scrapy.linkextractors import LinkExtractor
 from scrapy.loader import ItemLoader
 
 from ..items import ScrapebucketItem
+from ..spider_helpers.response_json import loads_response_body
 
 
 class GloveboxSpider(scrapy.Spider):
@@ -25,16 +25,23 @@ class GloveboxSpider(scrapy.Spider):
             url=f'{self.url}api/listing',
             method='POST',
             formdata={
-                "blockid": "84",
-                "pageid": "21",
+                'blockid': '84',
+                'pageid': '21',
             },
         )
 
     def parse(self, response):
-        res_json = json.loads(response.body)
-        pages = res_json.get('last_page')
+        res_json = loads_response_body(
+            response.body, url=response.url, label=self.name
+        )
+        if not res_json:
+            return
 
-        for page in range(1, pages + 1):
+        pages = res_json.get('last_page')
+        if not pages:
+            return
+
+        for page in range(1, int(pages) + 1):
             yield scrapy.Request(
                 url=f'{self.url}inventory/all?type=&make=&model=&order=asc&page={page}',
                 callback=self.vdp_urls,

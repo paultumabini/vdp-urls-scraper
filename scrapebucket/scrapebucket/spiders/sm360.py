@@ -1,3 +1,5 @@
+"""SM360 inventory: vehicle JSON is embedded in page script as Jsonnet-ish ``vehicleDetails``."""
+
 import json
 from urllib.parse import urlparse
 
@@ -11,12 +13,18 @@ from ..items import ScrapebucketItem
 
 
 class Sm360Spider(CrawlSpider):
+    """
+    VDP HTML contains ``vehicleDetails: ...`` inside a script blob; we slice between markers
+    and evaluate via ``_jsonnet`` (not plain ``json.loads``).
+    """
+
     name = 'sm360'
     domain_name = ''
 
     custom_settings = {
-        'DOWNLOADER_MIDDLEWARES': {'scrapebucket.middlewares.ScrapebucketDownloaderMiddleware': 543},
-        # 'SPIDER_MIDDLEWARES': {'scrapebucket.middlewares.ScrapebucketSpiderMiddleware': 543},
+        'DOWNLOADER_MIDDLEWARES': {
+            'scrapebucket.middlewares.ScrapebucketDownloaderMiddleware': 543
+        },
     }
 
     def start_requests(self):
@@ -25,7 +33,6 @@ class Sm360Spider(CrawlSpider):
         for which in ['new', 'used', 'certified']:
             yield scrapy.Request(url=f'{self.url}/{which}-inventory')
 
-    # vehicle urls
     link_extractor1 = LinkExtractor(
         restrict_xpaths=[
             '//div[@class="inventory-preview-bravo-section-title"]/a',
@@ -33,8 +40,9 @@ class Sm360Spider(CrawlSpider):
             '//div[@class="inventory-preview-bravo__infos-wrapper"]/a',
         ]
     )
-    # pagination urls
-    link_extractor2 = LinkExtractor(restrict_xpaths='//a[starts-with(@class, "pagination__page-button")]')
+    link_extractor2 = LinkExtractor(
+        restrict_xpaths='//a[starts-with(@class, "pagination__page-button")]'
+    )
 
     rules = (
         Rule(
@@ -56,13 +64,19 @@ class Sm360Spider(CrawlSpider):
 
     def parse_item(self, response):
         loader = ItemLoader(item=ScrapebucketItem(), selector=response)
-        page = response.meta['page']
 
-        # select elements at <script> tags then convert json string to json object
         json_txt = response.xpath(
             'normalize-space(substring-before(substring-after((//script[contains(.,"vehicleDetails:")]/text())[last()],"vehicleDetails:"),"formVehicle"))'
-        ).get()[:-1]
-        json_dict = json.loads(_jsonnet.evaluate_snippet('snippet', json_txt))
+        ).get()
+        if not json_txt or len(json_txt) < 2:
+            return
+
+        snippet = json_txt[:-1]
+        try:
+            json_dict = json.loads(_jsonnet.evaluate_snippet('snippet', snippet))
+        except Exception:
+            # Malformed embed or Jsonnet eval failure — skip item rather than poison the crawl.
+            return
 
         loader.add_value('category', json_dict.get('status'))
         loader.add_value('year', json_dict.get('year'))

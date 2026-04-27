@@ -1,3 +1,4 @@
+import logging
 import math
 import time
 from urllib.parse import urlparse
@@ -11,6 +12,8 @@ from scrapy.utils.project import get_project_settings
 from scrapy_playwright.page import PageMethod
 
 from ..items import ScrapebucketItem
+
+logger = logging.getLogger(__name__)
 
 
 class TadvantageScrollSpider(scrapy.Spider):
@@ -59,9 +62,21 @@ class TadvantageScrollSpider(scrapy.Spider):
 
     async def parse(self, response):
         page = response.meta["playwright_page"]
-        total_units = response.xpath('//h5[@convertus-data-id="srp__vehicles-found"]/text()').get()
+        total_units = response.xpath(
+            '//h5[@convertus-data-id="srp__vehicles-found"]/text()'
+        ).get()
         units_per_page = 15
-        num_of_pages = math.ceil(int(remove_non_numeric(total_units)) / units_per_page)
+        try:
+            num_of_pages = math.ceil(
+                int(remove_non_numeric(total_units)) / units_per_page
+            )
+        except (TypeError, ValueError):
+            logger.warning(
+                '%s: could not parse vehicle count from %r',
+                self.name,
+                total_units,
+            )
+            num_of_pages = 1
 
         for _ in range(1, num_of_pages):
             # url_count = 15 * i
@@ -108,7 +123,10 @@ class TadvantageScrollSpider(scrapy.Spider):
         pagination = response.xpath('//div[@class="pagination__numbers"]/span/text()')
 
         if pagination:
-            total_pages = int(remove_non_numeric(pagination.get())) + 1
+            try:
+                total_pages = int(remove_non_numeric(pagination.get())) + 1
+            except (TypeError, ValueError):
+                total_pages = 0
             for page in range(2, total_pages):
                 yield scrapy.Request(
                     url=f'{self.url}/vehicles/?view=grid&pg={page}',

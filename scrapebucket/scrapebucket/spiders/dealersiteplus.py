@@ -1,3 +1,5 @@
+"""Carpages / Dealersite+ style WordPress inventory (mixed microdata and table VIN rows)."""
+
 from urllib.parse import urlparse
 
 import scrapy
@@ -10,8 +12,14 @@ from ..items import ScrapebucketItem
 
 
 class DealersiteplusSpider(CrawlSpider):
+    """
+    Entry paths differ by site install (``all-vehicles``, ``new-inventory``, ``vehicles``).
+
+    Pagination uses WordPress ``page-numbers``; some themes need an explicit User-Agent on
+    follow-up requests (``set_user_agent``).
+    """
+
     name = 'dealersiteplus'  # carpages
-    # allowed_domains = []
     domain_name = ''
 
     custom_settings = {
@@ -24,15 +32,15 @@ class DealersiteplusSpider(CrawlSpider):
         for page in ['all-vehicles/', 'new-inventory/', 'vehicles/']:
             yield scrapy.Request(url=f'{self.url}{page}')
 
-    # vehicle urls
     link_extractor1 = LinkExtractor(
         restrict_xpaths=[
             '//h4/a[contains(@title,*)]',
             '//div[@class="featured-card"]/a',
         ]
     )
-    # pagination urls
-    link_extractor2 = LinkExtractor(restrict_xpaths='//a[@class="next page-numbers"]')
+    link_extractor2 = LinkExtractor(
+        restrict_xpaths='//a[@class="next page-numbers"]'
+    )
 
     rules = (
         Rule(
@@ -52,14 +60,15 @@ class DealersiteplusSpider(CrawlSpider):
         return request
 
     def parse_item(self, response):
+        # Microdata-first; table/div fallbacks for themes without schema.org productID.
         vin1 = response.xpath('//li[@itemprop="productID"]/span/text()').get()
         vin2 = response.xpath('(//td[contains(text(),"VIN:")]/../td)[2]//text()').get()
         vin3 = response.xpath('//div[contains(text(),"VIN:")]/text()').get()
         vin4 = response.xpath('(//div[contains(text(),"VIN:")]/../div)[2]//text()').get()
 
-        vin = vin1 if vin1 else vin2 if vin2 else vin3
+        vin = vin1 or vin2 or vin3
 
-        # hardcoded conditions for conflicting xpath exp:
+        # Known layout conflict: this domain exposes VIN in the fourth xpath variant only.
         if self.domain_name == 'spadonileasing.com':
             vin = vin4
 

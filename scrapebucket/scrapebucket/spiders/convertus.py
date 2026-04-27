@@ -1,12 +1,11 @@
-import json
 import math
 from urllib.parse import urlparse
 
-import requests
 import scrapy
 from scrapy.loader import ItemLoader
 
 from ..items import ScrapebucketItem
+from ..spider_helpers.response_json import loads_response_body
 from ..spider_helpers.url_qs import access_trader_direct_API, get_company_id
 
 
@@ -38,8 +37,15 @@ class ConvertusSpider(scrapy.Spider):
         )
 
     def parse(self, response):
-        json_res = json.loads(response.body)
-        parsed_data = json_res.get('results')
+        json_res = loads_response_body(
+            response.body, url=response.url, label=self.name
+        )
+        if not json_res:
+            return
+
+        parsed_data = json_res.get('results') or []
+        if not parsed_data:
+            return
 
         for result in parsed_data:
             loader = ItemLoader(ScrapebucketItem())
@@ -47,6 +53,9 @@ class ConvertusSpider(scrapy.Spider):
             # images = [image.get('image_original') for image in result.get('image', {})]
 
             vdp_url = result.get('vdp_url')
+            if not vdp_url or 'vehicles/' not in vdp_url:
+                continue
+
             indexed = vdp_url.index('vehicles/')
             new_vdp_url = self.url + vdp_url[indexed:]
 
@@ -64,8 +73,11 @@ class ConvertusSpider(scrapy.Spider):
             loader.add_value('domain', self.domain_name)
             yield loader.load_item()
 
-        # crawl following pages
-        pages = json_res.get('summary').get('total_vehicles')
+        summary = json_res.get('summary') or {}
+        pages = summary.get('total_vehicles')
+        if not pages:
+            return
+
         page_limit = math.ceil(pages / 15)
 
         if self.page <= page_limit:

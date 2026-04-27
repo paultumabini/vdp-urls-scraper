@@ -4,7 +4,7 @@ from pathlib import Path
 from django.core.files import File
 from PIL import Image
 
-image_types = {
+IMAGE_TYPES = {
     "jpg": "JPEG",
     "jpeg": "JPEG",
     "png": "PNG",
@@ -15,18 +15,22 @@ image_types = {
 
 
 def image_resize(image, width, height):
-
+    """
+    Resize an uploaded image in memory if it exceeds dimensions.
+    """
     img = Image.open(image)
 
     if img.width > width or img.height > height:
-        output_size = (width, height)
-        img.thumbnail(output_size, Image.ANTIALIAS)
+        # LANCZOS gives high-quality downscaling for profile thumbnails.
+        img.thumbnail((width, height), Image.Resampling.LANCZOS)
         img_filename = Path(image.file.name).name
-        img_suffix = Path(image.file.name).name.split(".")[-1]
-        img_format = image_types[img_suffix]
+        # Preserve original extension mapping; fallback prevents unknown type crashes.
+        img_suffix = Path(image.file.name).suffix.lower().lstrip(".")
+        img_format = IMAGE_TYPES.get(img_suffix, "JPEG")
         buffer = BytesIO()
         img.save(buffer, format=img_format)
+        buffer.seek(0)
         file_object = File(buffer)
 
-        # Save the new resized file as usual, which will save to S3 using django-storages
+        # Persist through Django storage backend (local/S3/etc).
         image.save(img_filename, file_object)

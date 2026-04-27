@@ -11,7 +11,22 @@ from django.utils.safestring import mark_safe
 from .models import AimDealer, Project, Scrape, SpiderLog, TargetSite, Webprovider
 from .utils import ScrapeEntryCode
 
-# Register your models here.
+ACTIVE_COLOR = '#28a745'
+INACTIVE_COLOR = '#fea95e'
+ERROR_COLOR = '#ff0000'
+MANILA_TZ = pytz.timezone('Asia/Manila')
+
+
+def _status_color(status_value):
+    if status_value == 'ACTIVE':
+        return ACTIVE_COLOR
+    if status_value == 'INACTIVE':
+        return INACTIVE_COLOR
+    return ERROR_COLOR
+
+
+def _format_manila_datetime(dt_value):
+    return pytz.utc.localize(dt_value).astimezone(MANILA_TZ).strftime('%Y-%m-%d %I:%M:%S %p')
 
 
 class UserAdmin(UserAdmin):
@@ -57,20 +72,17 @@ class AimDealerAdminView(admin.ModelAdmin):
         description='VDP URLS', ordering='site_url'
     )  # description is  the column name
     def show_site_url(self, obj):
-        if obj.site_url:
-            return format_html(
-                "<a href='{url}' target='_blank'>{url}</a>", url=obj.site_url
-            )
-        else:
+        if not obj.site_url:
             return ''
+        return format_html(
+            "<a href='{url}' target='_blank'>{url}</a>", url=obj.site_url
+        )
 
-    # function to change the icons
     def account_icon(self, obj):
-     if obj.account == 'ACTIVE':
-        return True
-     elif obj.account == 'INACTIVE':
-        return None
-     else:
+        if obj.account == 'ACTIVE':
+            return True
+        if obj.account == 'INACTIVE':
+            return None
         return False
 
     account_icon.boolean = True
@@ -81,15 +93,11 @@ class AimDealerAdminView(admin.ModelAdmin):
         ordering='account',
     )
     def account_status(self, obj):
-        if obj.account == 'ACTIVE':
-            color = '#28a745'
-        elif obj.account == 'INACTIVE':
-            color = '#fea95e'
-        else:
-            color = '#ff0000'
-        return format_html('<strong><p style="color:{}">{}</p></strong>',color,obj.account)
-
-    # account_status.allow_tags = True
+        return format_html(
+            '<strong><p style="color:{}">{}</p></strong>',
+            _status_color(obj.account),
+            obj.account,
+        )
 
     # format date
     @admin.display(ordering='date_created')
@@ -108,15 +116,17 @@ class AimDealerAdminView(admin.ModelAdmin):
     # auto change 'web_provider' field at TargetSite after saving
     # wrap it in `try...except` to get rid of error 'self.model.DoesNotExist'
     def save_model(self, request, obj, form, change):
+        # Keep TargetSite provider/spider in sync when dealer provider changes.
         try:
-            object = TargetSite.objects.get(site_name__dealer_id=obj.dealer_id)
-            object.web_provider = obj.web_provider.name
-            object.spider = obj.web_provider.name
-            object.save()
+            target_site = TargetSite.objects.get(site_name__dealer_id=obj.dealer_id)
+            target_site.web_provider = obj.web_provider.name
+            target_site.spider = obj.web_provider.name
+            target_site.save()
         except TargetSite.DoesNotExist:
+            # Dealer may not yet have a corresponding TargetSite record.
             pass
 
-        # If the entry is being modified, set the modified_by field
+        # Track who created/updated dealer rows for auditability.
         if change:
             obj.modified_by = request.user
 
@@ -161,16 +171,10 @@ class TargetSiteAdminView(admin.ModelAdmin, ScrapeEntryCode):
     # from `aimdealer.account` via foreign key at `site_name`
     @admin.display(ordering='site_name__account', description='account')
     def account_status(self, obj):
-        if obj.site_name.account == 'ACTIVE':
-            color = '#28a745'
-        elif obj.site_name.account == 'INACTIVE':
-            color = '#fea95e'
-        else:
-            color = '#ff0000'
         return format_html(
-        '<strong><span style="color:{}">{}</span></strong>',
-        color, 
-        obj.site_name.account
+            '<strong><span style="color:{}">{}</span></strong>',
+            _status_color(obj.site_name.account),
+            obj.site_name.account,
         )
 
 
@@ -213,7 +217,7 @@ class TargetSiteAdminView(admin.ModelAdmin, ScrapeEntryCode):
     def formfield_for_foreignkey(self, db_field, request, **kwargs):
         if db_field.name == 'site_name':
             kwargs["queryset"] = AimDealer.objects.order_by('dealer_name')
-        return super(TargetSiteAdminView, self).formfield_for_foreignkey(
+        return super().formfield_for_foreignkey(
             db_field, request, **kwargs
         )
 
@@ -221,7 +225,7 @@ class TargetSiteAdminView(admin.ModelAdmin, ScrapeEntryCode):
     # NOTE: the `obj` is the direct Model's instance being displayed in that row,
     #  but still can access other Model's instance via ForeignKey
     def save_model(self, request, obj, form, change):
-        # add `site_url` if it is not yet available or added
+        # Backfill site_url from the linked dealer for legacy/manual entries.
         dealer_id = f'{obj.site_name}'.split('-')[0].strip()
         site = AimDealer.objects.get(dealer_id=dealer_id).site_url
 
@@ -229,7 +233,7 @@ class TargetSiteAdminView(admin.ModelAdmin, ScrapeEntryCode):
             obj.site_url = site
             # obj.user = request.user
 
-        # create entry code if not available
+        # Generate entry code once and keep it stable afterwards.
         if not obj.entry_code:
             obj.entry_code = self.get_scrape_entry_code(form)
 
@@ -247,7 +251,7 @@ class TargetSiteAdminView(admin.ModelAdmin, ScrapeEntryCode):
     def last_scraped(self, obj):
         try:
             last_log = obj.spider_logs.last()
-            
+
             if not last_log or last_log.items_scraped is None:
                 return mark_safe('<strong style="color:#ff0000" title="Failed to scrape">Error!</strong>')
 
@@ -278,6 +282,7 @@ class TargetSiteAdminView(admin.ModelAdmin, ScrapeEntryCode):
     # To avoid duplicating rows values when sorting table at UI
     def get_queryset(self, request):
         qs = super().get_queryset(request)
+        # Avoid duplicate rows from JOIN-heavy admin sorting/filtering.
         return qs.distinct()
 
 
@@ -286,12 +291,12 @@ class DateYesterdayFieldListFilter(DateFieldListFilter):
         super().__init__(*args, **kwargs)
 
         today = datetime.datetime.now()  # utc
-        tz = pytz.timezone('Asia/Manila')
-        date = pytz.utc.localize(today).astimezone(tz)
+        date = pytz.utc.localize(today).astimezone(MANILA_TZ)
 
         yesterday = date - datetime.timedelta(days=1)
 
         self.links = list(self.links)
+        # Inject a quick "since yesterday" preset in the date sidebar filter.
         self.links.insert(
             2,
             (
@@ -337,26 +342,20 @@ class SpiderlogsAdminView(admin.ModelAdmin):
 
     @admin.display(ordering='target_site__site_name__account', description='account')
     def account_status(self, obj):
-        if obj.target_site.site_name.account == 'ACTIVE':
-            color = '#28a745'
-        elif obj.target_site.site_name.account == 'INACTIVE':
-            color = '#fea95e'
-        else:
-            color = '#ff0000'
         return format_html(
             '<strong><span style="color:{}">{}</span></strong>',
-            color, 
-            obj.target_site.site_name.account
+            _status_color(obj.target_site.site_name.account),
+            obj.target_site.site_name.account,
         )
 
     @admin.display(ordering='target_site__site_name__dealer_id', description='DID')
     def target_site_dealer_id(self, obj):
         did = obj.target_site.site_name.dealer_id
         return format_html(
-        '<a href="/admin/project/aimdealer/{}/change/" target="_blank"><u>{}</u></a>',
-        did,
-        did
-         )
+            '<a href="/admin/project/aimdealer/{}/change/" target="_blank"><u>{}</u></a>',
+            did,
+            did,
+        )
 
     @admin.display(ordering='target_site__site_name__dealer_name', description='Dealer')
     def target_site_dealer_name(self, obj):
@@ -370,9 +369,7 @@ class SpiderlogsAdminView(admin.ModelAdmin):
 
     @admin.display(ordering='date_created')
     def date_created_fmt(self, obj):
-        tz = pytz.timezone('Asia/Manila')
-        date = pytz.utc.localize(obj.date_created).astimezone(tz)
-        return date.strftime('%Y-%m-%d %I:%M:%S %p')
+        return _format_manila_datetime(obj.date_created)
 
     @admin.display(ordering='items_scraped')
     def scraped(self, obj):
@@ -382,14 +379,13 @@ class SpiderlogsAdminView(admin.ModelAdmin):
         )  # access via ForeignKey: Use dot(.) not underscore(_) or dunder(__)
         d_name = obj.target_site.site_name.dealer_name
         if items_scraped:
-         return format_html(
+            return format_html(
                 '<a href="/admin/project/scrape/?q={did} {name}" target="_blank"><u><strong>{count}</strong></u></a>',
                 did=did,
                 name=d_name,
                 count=items_scraped
             )
-        else:
-            return mark_safe('<strong><span style="color:#ff0000">-none-</span></strong>')
+        return mark_safe('<strong><span style="color:#ff0000">-none-</span></strong>')
 
 
 
@@ -431,9 +427,7 @@ class ScrapeAdminView(admin.ModelAdmin):
 
     @admin.display(ordering='date_created')
     def date_created_fmt(self, obj):
-        tz = pytz.timezone('Asia/Manila')
-        date = pytz.utc.localize(obj.last_checked).astimezone(tz)
-        return date.strftime('%Y-%m-%d %I:%M:%S %p')
+        return _format_manila_datetime(obj.last_checked)
 
     date_created_fmt.short_description = 'Date Created'
 

@@ -1,107 +1,85 @@
+"""
+Playwright (sync) helpers for pagination and raw HTML used by some spiders.
+"""
+
+from __future__ import annotations
+
 import re
 from functools import reduce
 
 from playwright.sync_api import sync_playwright
-from playwright_stealth import stealth
-from scrapy.selector import Selector
+from playwright_stealth import stealth_sync
 
 
 class PlaywrightHelper:
-    def __init__(self, url, selector, wait_until):
+    def __init__(self, url: str, selector: str, wait_until: str):
         self.url = url
         self.selector = selector
         self.wait_until_selector = wait_until
 
-    def get_pagination_no_text(self, page, browser):
+    def get_pagination_no_text(self, page, browser) -> int:
         page.wait_for_selector(self.wait_until_selector)
-        texts = page.query_selector_all(self.selector)
-        pagination = [int(text.inner_text()) for text in texts]
+        elements = page.query_selector_all(self.selector)
+        pagination = []
+        for el in elements:
+            try:
+                pagination.append(int(el.inner_text()))
+            except (TypeError, ValueError):
+                continue
+        if not pagination:
+            browser.close()
+            return 1
         page_number = reduce(lambda a, b: a if a > b else b, pagination)
-
         browser.close()
         return page_number
 
-    def get_pagination_remove_text(self, page, browser):
+    def get_pagination_remove_text(self, page, browser) -> int:
         page.wait_for_selector(self.wait_until_selector)
-        texts = page.query_selector_all(self.selector)
-        pages = [re.sub(r'[^0-9]', '', text) for text in texts]
-
+        elements = page.query_selector_all(self.selector)
+        digits: list[int] = []
+        for el in elements:
+            raw = re.sub(r'[^0-9]', '', el.inner_text() or '')
+            if raw.isdigit():
+                digits.append(int(raw))
         browser.close()
-        return int(pages)
+        return max(digits) if digits else 1
 
-    def get_page_num_src(self, method):
+    def get_page_num_src(self, method: str) -> int:
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(headless=True)
             page = browser.new_page()
             stealth_sync(page)
-            # page.set_default_timeout(0)
-            page.goto(self.url, timeout=60000)
-            total_pages = getattr(PlaywrightHelper, method)(self, page, browser)
-        return total_pages
-
-
-# result = PlaywrightHelper(
-#     f'https://www.macdonaldbuickgmc.com/new-vehicles/',
-#     '//div[@class="pagination-state"]',
-#     '//div[@class="pagination-state"]',
-# )
-# pages = result.get_source_page('get_pagination_remove_text')
-
-# result = PlaywrightHelper(
-#     f'https://www.transcanadafinance.com/inventory.html?filterid=a1q0-10x0-0-0',
-#     '//span[@class="s-name"]',
-#     '//span[@class="s-name"]',
-# )
-# pages = result.get_source_page('get_pagination')
-
-# print('finally', pages)
+            page.goto(self.url, timeout=60_000)
+            try:
+                fn = getattr(self, method)
+                return fn(page, browser)
+            except Exception:
+                if browser.is_connected():
+                    browser.close()
+                raise
 
 
 class PlaywrightPageSourceHelper:
-    def __init__(self, url, selector, wait_until):
+    def __init__(self, url: str, selector: str, wait_until: str):
         self.url = url
         self.selector = selector
         self.wait_until_selector = wait_until
 
     def get_page_source_text(self, page, browser):
         page.wait_for_selector(self.wait_until_selector)
-        page.locator(f"xpath = {self.selector}")
         texts = page.query_selector_all(self.selector)
-
         browser.close()
-
         return texts
 
-    def get_page_source(self):
+    def get_page_source(self) -> str:
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(headless=True)
             page = browser.new_page()
-            stealth_sync(page)
-            # page.set_default_timeout(0)
-            page.goto(self.url, timeout=60000)
-            page.wait_for_selector(self.wait_until_selector)
-
-            html = page.content()
-
-            browser.close()
-
-            return html
-
-        #     total_pages = getattr(PlaywrightPageSourceHelper, method)(self, page, browser)
-        # return total_pages
-
-
-# ==============[ TEST !!! ]=======================
-# get page number thru playwright helper class
-# elem_selector = '//a[@class="vehicleTitleLink"]/@href'
-# wait_until_elem_selector = '//a[@class="vehicleTitleLink"]'
-# html_text = PlaywrightPageSourceHelper(
-#     'https://amford.com/NewFordInventory',
-#     elem_selector,
-#     wait_until_elem_selector,
-# ).get_page_source()
-
-# vdp_links = Selector(text=html_text).xpath(elem_selector).getall()
-# for link in vdp_links:
-#     url = link
-#     print('target_elems', url)
+            try:
+                stealth_sync(page)
+                page.goto(self.url, timeout=60_000)
+                page.wait_for_selector(self.wait_until_selector)
+                return page.content()
+            finally:
+                if browser.is_connected():
+                    browser.close()

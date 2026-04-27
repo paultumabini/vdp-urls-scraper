@@ -1,14 +1,23 @@
+"""Typesense ``multi_search`` spider (hosted collection + API key on the query string)."""
+
 import json
-from urllib.parse import urlparse
+import logging
 
 import scrapy
-from scrapy.loader import ItemLoader
 
-from ..items import ScrapebucketItem
-from ..utils import COOKIE_NOVLANBROS, cookie_parser
+from ..spider_helpers.response_json import loads_response_body
+
+logger = logging.getLogger(__name__)
 
 
 class ZopDealerSpider(scrapy.Spider):
+    """
+    Single POST template walks the SRP; ``out_of`` from the first batch mutates ``per_page``.
+
+    NOTE: This mirrors a legacy integration (key in URL). Prefer env-driven endpoints/keys
+    if you externalize configuration.
+    """
+
     name = 'zopdealer'
     page = 1
     per_page = 24
@@ -30,8 +39,8 @@ class ZopDealerSpider(scrapy.Spider):
                 "facet_by": "make,model,selling_price,year",
                 "filter_by": "",
                 "max_facet_values": 50,
-                "page": f"{page}",
-                "per_page": f"{per_page}",
+                "page": "1",
+                "per_page": "24",
             }
         ]
     }
@@ -50,10 +59,22 @@ class ZopDealerSpider(scrapy.Spider):
         )
 
     def parse(self, response):
-        res_dict = json.loads(response.body)
+        res_dict = loads_response_body(
+            response.body, url=response.url, label=self.name
+        )
+        if not res_dict:
+            return
 
-        self.per_page = res_dict.get('results')[0].get('out_of')
-        self.query.get('searches')[0].update({'per_page': self.per_page})
+        results = res_dict.get('results') or []
+        if not results:
+            logger.warning('zopdealer: no results in response')
+            return
+
+        batch = results[0]
+        out_of = batch.get('out_of')
+        if out_of is not None:
+            self.per_page = out_of
+            self.query.get('searches')[0].update({'per_page': self.per_page})
 
         yield scrapy.Request(
             url=f'{self.url}',
@@ -65,7 +86,12 @@ class ZopDealerSpider(scrapy.Spider):
             callback=self.parse,
         )
 
-        units = res_dict.get('results')[0].get('hits')
-
+        units = batch.get('hits') or []
         for i, unit in enumerate(units):
-            print(i + 1, unit.get('document').get('stock_no'), unit.get('document').get('vin'))
+            doc = unit.get('document') or {}
+            logger.debug(
+                'zopdealer item %s stock=%s vin=%s',
+                i + 1,
+                doc.get('stock_no'),
+                doc.get('vin'),
+            )

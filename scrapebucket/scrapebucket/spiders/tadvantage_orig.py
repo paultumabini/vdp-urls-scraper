@@ -1,4 +1,4 @@
-import json
+import logging
 import math
 from urllib.parse import urlparse
 
@@ -6,11 +6,14 @@ import scrapy
 from scrapy.loader import ItemLoader
 
 from ..items import ScrapebucketItem
+from ..spider_helpers.response_json import loads_response_body
 from ..spider_helpers.url_qs import (
     get_company_id,
     keep_top_lvl_domain,
     parse_trader_url,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class TadvantageOrigSpider(scrapy.Spider):
@@ -42,7 +45,7 @@ class TadvantageOrigSpider(scrapy.Spider):
             return
 
         yield scrapy.Request(
-            url=f'{parse_trader_url(self.url, self.feed_id, self.page, 15)}',
+            url=f'{parse_trader_url(self.url, self.company_id, self.page, 15)}',
             callback=self.parse,
             headers={
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -54,9 +57,16 @@ class TadvantageOrigSpider(scrapy.Spider):
         )
 
     def parse(self, response):
-        json_res = json.loads(response.body)
-        parsed_data = json_res.get('results')
-        print('TAE', parsed_data)
+        json_res = loads_response_body(
+            response.body, url=response.url, label=self.name
+        )
+        if not json_res:
+            return
+
+        parsed_data = json_res.get('results') or []
+        if not parsed_data:
+            logger.warning('tadvantage_orig: empty results for %s', response.url)
+            return
 
         for result in parsed_data:
             loader = ItemLoader(ScrapebucketItem())
@@ -64,6 +74,8 @@ class TadvantageOrigSpider(scrapy.Spider):
             # images = [image.get('image_original') for image in result.get('image', {})]
 
             vdp_url = result.get('vdp_url')
+            if not vdp_url or 'vehicles/' not in vdp_url:
+                continue
 
             indexed = vdp_url.index('vehicles/')
             new_vdp_url = self.url + vdp_url[indexed:]
@@ -82,13 +94,16 @@ class TadvantageOrigSpider(scrapy.Spider):
             loader.add_value('domain', self.domain_name)
             yield loader.load_item()
 
-        # crawl following pages
-        pages = json_res.get('summary').get('total_vehicles')
+        summary = json_res.get('summary') or {}
+        pages = summary.get('total_vehicles')
+        if not pages:
+            return
+
         page_limit = math.ceil(pages / 15)
 
         if self.page <= page_limit:
             self.page += 1
             yield scrapy.Request(
-                url=f'{parse_trader_url(self.url, self.feed_id, self.page, 15)}',
+                url=f'{parse_trader_url(self.url, self.company_id, self.page, 15)}',
                 callback=self.parse,
             )

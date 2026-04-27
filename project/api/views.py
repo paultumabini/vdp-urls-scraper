@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from collections import defaultdict
 
 from project.models import Scrape, TargetSite
 from rest_framework import status
@@ -10,99 +10,102 @@ from rest_framework.decorators import (
 )
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-from rest_framework.throttling import UserRateThrottle
 
 from .serializers import ScrapeSerializer
+
+
+def _serialize_domain_group_from_instances(scrapes):
+    """Group pre-fetched Scrape rows by target domain and serialize."""
+    by_domain = defaultdict(list)
+    for scrape in scrapes:
+        ts = scrape.target_site
+        if ts and ts.site_id:
+            by_domain[ts.site_id].append(scrape)
+    return [
+        {name: ScrapeSerializer(by_domain[name], many=True).data}
+        for name in sorted(by_domain.keys())
+    ]
 
 
 @api_view(['GET'])
 @authentication_classes([TokenAuthentication])
 @permission_classes([IsAuthenticated])
 def get_scraped_items(request):
-
+    # Enforce explicit query contract to keep response shape predictable.
     if 'webproviders' not in request.GET or 'domains' not in request.GET:
-        return Response({'detail': 'Bad Request.'}, status=status.HTTP_404_NOT_FOUND)
+        return Response({'detail': 'Bad Request.'}, status=status.HTTP_400_BAD_REQUEST)
 
-    providers = (
-        'available'
-        if request.GET.get('webproviders') == 'available'
-        else request.GET.get('webproviders', False).split(',')
-    )
-    domain = request.GET.get('domains', False)
+    webproviders_raw = (request.GET.get('webproviders') or '').strip()
+    domain = (request.GET.get('domains') or '').strip()
+    if not webproviders_raw or not domain:
+        return Response({'detail': 'Bad Request.'}, status=status.HTTP_400_BAD_REQUEST)
 
-    # stored returned api data
+    if webproviders_raw == 'available':
+        providers = 'available'
+    else:
+        providers = [p.strip() for p in webproviders_raw.split(',') if p.strip()]
+        if not providers:
+            return Response({'detail': 'Bad Request.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Top-level payload grouped by provider, then by domain.
     web_providers_data = []
 
-    # filtered scrape day
-    date_threshold = datetime.now() - timedelta(hours=48)
-
     if providers == 'available' and domain == 'all':
-
         all_providers = sorted(
-            list({wb.web_provider for wb in TargetSite.objects.all()})
+            p
+            for p in TargetSite.objects.values_list('web_provider', flat=True).distinct()
+            if p
         )
 
         for provider in all_providers:
-            scrapes = Scrape.objects.filter(
-                spider__iexact=provider
-            ).all()  # last_checked__gte=date_threshold
-
-            domain_names = list(
-                {
-                    scrape.target_site.site_id
-                    for scrape in scrapes
-                    # handle `AttributeError: 'NoneType' object has no attribute 'site_id`
-                    if scrape.target_site and scrape.target_site.site_id
-                }
+            scrapes = list(
+                Scrape.objects.filter(spider__iexact=provider).select_related(
+                    'target_site'
+                )
             )
-            sites = []
-
             if scrapes:
-                for name in domain_names:
-                    item_data = scrapes.filter(target_site=name).all()
-
-                    serializers = ScrapeSerializer(item_data, many=True)
-                    sites.append({name: serializers.data})
-                web_providers_data.append({provider: sites})
+                web_providers_data.append(
+                    {provider: _serialize_domain_group_from_instances(scrapes)}
+                )
 
         return Response(web_providers_data)
 
-    # resolved
     elif len(providers) >= 1 and domain == 'all':
         for provider in sorted(providers):
-            scrapes = Scrape.objects.filter(
-                spider__iexact=provider
-            ).all()  # last_checked__gte=date_threshold
-            domain_names = list({scrape.target_site.site_id for scrape in scrapes})
-            sites = []
-
+            scrapes = list(
+                Scrape.objects.filter(spider__iexact=provider).select_related(
+                    'target_site'
+                )
+            )
             if not scrapes:
                 return Response(
                     {'detail': 'Items not found.'}, status=status.HTTP_404_NOT_FOUND
                 )
 
-            for name in domain_names:
-                item_data = scrapes.filter(target_site=name).all()
-
-                serializers = ScrapeSerializer(item_data, many=True)
-                sites.append({name: serializers.data})
-            web_providers_data.append({provider: sites})
+            web_providers_data.append(
+                {provider: _serialize_domain_group_from_instances(scrapes)}
+            )
 
         return Response(web_providers_data)
 
     elif len(providers) == 1 and domain != 'all':
-        scrapes = Scrape.objects.filter(
-            spider__iexact=providers[0], target_site=domain
-        ).all()  # last_checked__gte=date_threshold
-        sites = []
-
-        if not scrapes:
+        # Fast path for a single provider + single domain query.
+        scrapes_list = list(
+            Scrape.objects.filter(
+                spider__iexact=providers[0], target_site=domain
+            ).select_related('target_site')
+        )
+        if not scrapes_list:
             return Response(
                 {'detail': 'Items not found.'}, status=status.HTTP_404_NOT_FOUND
             )
-
-        serializers = ScrapeSerializer(scrapes, many=True)
-        sites.append({scrapes[0].target_site.site_id: serializers.data})
+        serializers = ScrapeSerializer(scrapes_list, many=True)
+        site_key = (
+            scrapes_list[0].target_site.site_id
+            if scrapes_list[0].target_site
+            else domain
+        )
+        sites = [{site_key: serializers.data}]
         web_providers_data.append({providers[0]: sites})
         return Response(web_providers_data)
 
@@ -110,18 +113,3 @@ def get_scraped_items(request):
         return Response({'detail': 'Bad Request.'}, status=status.HTTP_400_BAD_REQUEST)
 
 
-# using axios
-
-# const searchWiki = async () => {
-#     const reponse = await axios.get('http://localhost:8000/api/scraped-items/aim-dealers/', {
-#     method: 'get',
-#     params: {
-#         webproviders: 'available',
-#         domains: 'all',
-#     },
-#     headers: {
-#         Authorization: 'Token f4b2d04a39d6fe6e4a7e04d444924daaefa33497',
-#     },
-#     });
-#     console.log(reponse.data);
-# };

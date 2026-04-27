@@ -1,12 +1,11 @@
-import json
 from urllib.parse import urlparse
 
-import requests
 import scrapy
 from scrapy.loader import ItemLoader
 from scrapy.selector import Selector
 
 from ..items import ScrapebucketItem
+from ..spider_helpers.response_json import loads_response_body
 
 
 class EdealerSpider(scrapy.Spider):
@@ -14,22 +13,27 @@ class EdealerSpider(scrapy.Spider):
     domain_name = ''
 
     def start_requests(self):
-        self.domain_name = '.'.join(urlparse(self.url).netloc.split('.')[-2:]).replace('-', '')
+        self.domain_name = '.'.join(urlparse(self.url).netloc.split('.')[-2:]).replace(
+            '-', ''
+        )
 
         headers = {
-            "Accept": "*/*",
-            "Accept-Encoding": "gzip, deflate, br",
-            "Accept-Language": "en-US,en;q=0.5",
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-            "Origin": f"{self.url}",
-            "Referer": f"{self.url}new/",
-            "Sec-Ch-ua": """Google Chrome";v="111", "Not(A:Brand";v="8", "Chromium";v="111""",
-            "Sec-Fetch-Mode": "cors",
-            "Sec-Fetch-Site": "same-origin",
-            "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/111.0.0.0 Safari/537.36",
-            "X-Requested-With": "XMLHttpRequest",
+            'Accept': '*/*',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+            'Origin': f'{self.url}',
+            'Referer': f'{self.url}new/',
+            'Sec-Ch-ua': '"Google Chrome";v="111", "Not(A:Brand";v="8", "Chromium";v="111"',
+            'Sec-Fetch-Mode': 'cors',
+            'Sec-Fetch-Site': 'same-origin',
+            'user-agent': (
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+                '(KHTML, like Gecko) Chrome/111.0.0.0 Safari/537.36'
+            ),
+            'X-Requested-With': 'XMLHttpRequest',
         }
 
         yield scrapy.FormRequest(
@@ -37,8 +41,8 @@ class EdealerSpider(scrapy.Spider):
             method='POST',
             headers=headers,
             formdata={
-                "ajax": "true",
-                "refresh": "true",
+                'ajax': 'true',
+                'refresh': 'true',
             },
         )
 
@@ -47,29 +51,47 @@ class EdealerSpider(scrapy.Spider):
             method='POST',
             headers=headers,
             formdata={
-                "ajax": "true",
-                "refresh": "true",
+                'ajax': 'true',
+                'refresh': 'true',
             },
         )
 
     def parse(self, response):
-        res = json.loads(response.body)
-        items = res.get('vehicles')
+        res = loads_response_body(
+            response.body, url=response.url, label=self.name
+        )
+        if not res:
+            return
+
+        items = res.get('vehicles') or []
 
         for item in items:
-            html = Selector(text=item.get('vehicleCellHTML'))
+            cell_html = item.get('vehicleCellHTML')
+            if not cell_html:
+                continue
+
+            html = Selector(text=cell_html)
 
             vin1 = html.xpath('//input/@value').get()
-            vin2 = html.xpath('//div[@class="vehicle-information-grid"]/following-sibling::input/@value').get()
+            vin2 = html.xpath(
+                '//div[@class="vehicle-information-grid"]/following-sibling::input/@value'
+            ).get()
 
-            vdp_url1 = html.xpath('//div[contains(@class,"vehicle-list-cell")]/@itemid').get()
-            vdp_url2 = html.xpath('//p[@class="vehicle-year-make-model"]/a/@href').get()
+            vdp_url1 = html.xpath(
+                '//div[contains(@class,"vehicle-list-cell")]/@itemid'
+            ).get()
+            vdp_url2 = html.xpath(
+                '//p[@class="vehicle-year-make-model"]/a/@href'
+            ).get()
 
             vin = vin1 if vin1 else vin2
             vdp_url = vdp_url1 if vdp_url1 else vdp_url2
 
             loader = ItemLoader(ScrapebucketItem())
-            loader.add_value('vehicle_url', f'{self.url}{vdp_url[1:]}')
+            if vdp_url and len(vdp_url) > 1:
+                loader.add_value('vehicle_url', f'{self.url}{vdp_url[1:]}')
+            elif vdp_url:
+                loader.add_value('vehicle_url', f'{self.url}{vdp_url}')
             loader.add_value('vin', vin)
             loader.add_value('domain', self.domain_name)
 
@@ -79,19 +101,22 @@ class EdealerSpider(scrapy.Spider):
 
         if has_next_page:
             headers = {
-                "Accept": "*/*",
-                "Accept-Encoding": "gzip, deflate, br",
-                "Accept-Language": "en-US,en;q=0.5",
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-                "Origin": f"{self.url}",
-                "Referer": f"{self.url}{has_next_page}",
-                "Sec-Ch-ua": """Google Chrome";v="111", "Not(A:Brand";v="8", "Chromium";v="111""",
-                "Sec-Fetch-Mode": "cors",
-                "Sec-Fetch-Site": "same-origin",
-                "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/111.0.0.0 Safari/537.36",
-                "X-Requested-With": "XMLHttpRequest",
+                'Accept': '*/*',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Accept-Language': 'en-US,en;q=0.5',
+                'Cache-Control': 'no-cache',
+                'Connection': 'keep-alive',
+                'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                'Origin': f'{self.url}',
+                'Referer': f'{self.url}{has_next_page}',
+                'Sec-Ch-ua': '"Google Chrome";v="111", "Not(A:Brand";v="8", "Chromium";v="111"',
+                'Sec-Fetch-Mode': 'cors',
+                'Sec-Fetch-Site': 'same-origin',
+                'user-agent': (
+                    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+                    '(KHTML, like Gecko) Chrome/111.0.0.0 Safari/537.36'
+                ),
+                'X-Requested-With': 'XMLHttpRequest',
             }
             yield scrapy.FormRequest(
                 url=f'{self.url}{has_next_page}',

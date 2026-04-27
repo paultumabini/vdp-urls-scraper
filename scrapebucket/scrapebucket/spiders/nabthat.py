@@ -1,4 +1,10 @@
-import json
+"""
+Nabthat dealer API: paginated JSON list plus per-VIN detail requests for image hrefs.
+
+The list endpoint does not always embed full image URLs; we call ``/api/v1/vehicles/{vin}``
+for each row (N+1 HTTP calls) so pipelines get a consistent ``image_urls`` shape.
+"""
+
 from urllib.parse import urlparse
 
 import requests
@@ -6,25 +12,23 @@ import scrapy
 from scrapy.loader import ItemLoader
 
 from ..items import ScrapebucketItem
+from ..spider_helpers.response_json import loads_response_body
 
 
 class NabthatSpider(scrapy.Spider):
     name = 'nabthat'
-    # allowed_domains = []
     domain_name = ''
 
     custom_settings = {
-        # 'DOWNLOAD_DELAY': 1,
         'DOWNLOADER_MIDDLEWARES': {
             'scrapebucket.middlewares.ScrapebucketDownloaderMiddleware': 543
         },
-        # 'ITEM_PIPELINES': {'scrapebucket.pipelines.NabthatPipeline': 300},
     }
 
     def start_requests(self):
-
         self.domain_name = '.'.join(urlparse(self.url).netloc.split('.')[-2:])
 
+        # Seed both new and used pipelines; ``parse`` merges pagination for both orderings.
         yield scrapy.Request(
             url=f'{self.url}api/v1/vehicles?category=new&order=in_stock_date_desc&page=1',
             callback=self.parse,
@@ -35,17 +39,44 @@ class NabthatSpider(scrapy.Spider):
         )
 
     def get_image_urls(self, vin):
-        response = requests.get(url=f'{self.url}/api/v1/vehicles/{vin}')
-        data = response.json()
-        image_urls = data.get('vehicle').get('images')
-        return image_urls
+        if not vin:
+            return []
+        try:
+            response = requests.get(
+                url=f'{self.url}/api/v1/vehicles/{vin}',
+                timeout=30,
+            )
+            response.raise_for_status()
+        except requests.RequestException:
+            return []
+
+        data = loads_response_body(
+            response.content,
+            url=response.url,
+            label=f'{self.name}.vehicle_detail',
+        )
+        if not data:
+            return []
+
+        vehicle = data.get('vehicle') or {}
+        return vehicle.get('images') or []
 
     def parse(self, response):
-        resp = json.loads(response.body)
-        units = resp.get('models')
+        resp = loads_response_body(
+            response.body, url=response.url, label=self.name
+        )
+        if not resp:
+            return
+
+        units = resp.get('models') or []
 
         for unit in units:
-            images = [url.get('href') for url in self.get_image_urls(unit.get('vin'))]
+            raw_images = self.get_image_urls(unit.get('vin'))
+            images = [
+                url.get('href')
+                for url in raw_images
+                if isinstance(url, dict) and url.get('href')
+            ]
 
             loader = ItemLoader(item=ScrapebucketItem())
             loader.add_value('vin', unit.get('vin'))
@@ -56,17 +87,22 @@ class NabthatSpider(scrapy.Spider):
             loader.add_value('model', unit.get('model'))
             loader.add_value('trim', unit.get('trim'))
             loader.add_value('stock_number', unit.get('stock'))
-            loader.add_value('msrp', unit.get('pricing').get('msrp'))
-            loader.add_value('price', unit.get('pricing').get('price'))
-            loader.add_value('selling_price', unit.get('pricing').get('selling_price'))
+
+            pricing = unit.get('pricing') or {}
+            loader.add_value('msrp', pricing.get('msrp'))
+            loader.add_value('price', pricing.get('price'))
+            loader.add_value('selling_price', pricing.get('selling_price'))
+
             loader.add_value('image_urls', images)
             loader.add_value('images_count', len(images))
             loader.add_value('domain', self.domain_name)
 
             yield loader.load_item()
 
-        has_next = resp.get('meta').get('nextPage')
+        meta = resp.get('meta') or {}
+        has_next = meta.get('nextPage')
         if has_next:
+            # Advance both category streams together so neither stalls on page 1.
             yield scrapy.Request(
                 url=f'{self.url}/api/v1/vehicles?category=new&order=in_stock_date_desc&page={has_next}',
                 callback=self.parse,

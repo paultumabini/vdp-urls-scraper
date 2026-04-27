@@ -1,4 +1,3 @@
-from django.forms.models import model_to_dict
 from project.models import Scrape
 from rest_framework import serializers
 
@@ -26,14 +25,10 @@ class ScrapeSerializer(serializers.ModelSerializer):
             'last_checked',
         ]
 
-    #  return empty string if None
     def to_representation(self, instance):
-        my_fields = {field.name for field in Scrape._meta.get_fields()}
+        """Expose null DB values as empty strings for stable JSON (API contract)."""
         data = super().to_representation(instance)
-        for field in my_fields:
-            try:
-                if not data[field]:
-                    data[field] = ''
-            except KeyError:
-                pass
+        for key, value in data.items():
+            if value is None:
+                data[key] = ''
         return data

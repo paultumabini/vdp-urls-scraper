@@ -64,8 +64,9 @@ urlpatterns = [
     path('', include('project.urls')),
     # rest framework urls
     path(
-        'api/scraped-items/aim-dealers/', include('project.api.urls', 'api-scrape')
-    ),  # namespace of 'api-scrape'
+        'api/scraped-items/aim-dealers/',
+        include(('project.api.urls', 'api'), namespace='api-scrape'),
+    ),
 ]
 
 if settings.DEBUG:

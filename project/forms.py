@@ -1,29 +1,24 @@
-from crispy_forms.helper import FormHelper
-from crispy_forms.layout import Button, Fieldset, Layout, Submit
 from django import forms
-from django.core.validators import RegexValidator, URLValidator
+from django.core.validators import RegexValidator
 
-from .models import AimDealer, TargetSite
+from .models import TargetSite
 
 
 class SiteCreateForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        # Keep placeholder choices explicit for unselected ForeignKey dropdowns.
         self.fields['site_name'].empty_label = 'select...'
         self.fields['project'].empty_label = 'select...'
+        # Feed ID is optional for providers that do not expose feed metadata.
         self.fields['feed_id'].required = False
-        self.label_suffix = ''  # remove the default labe w/ colon. e.g. "Domain Name:"
-        # self.fields['project'].widget.attrs['style'] = 'font-style: italic;'
-        # self.fields['condition'].initial = True
-
-        # self.helper = FormHelper(self)
-        # self.helper.form_method = 'GET'
-        # self.helper.add_input(Button('submit', 'Submit', css_class='btn btn-primary'))
+        self.label_suffix = ''  # Remove default colon from labels.
 
     site_url = forms.CharField(
         label='Site URL',
         max_length=50,
         validators=[
+            # Validate URL-like input while allowing optional scheme from operators.
             RegexValidator(
                 r'((http|https)\:\/\/)?[a-zA-Z0-9\.\/\?\:@\-_=#]+\.([a-zA-Z]){2,6}([a-zA-Z0-9\.\&\/\?\:@\-_=#])*',
                 message='Please enter a valid web address',
@@ -50,6 +45,7 @@ class SiteCreateForm(forms.ModelForm):
         widget=forms.TextInput(
             attrs={
                 'class': 'form-control',
+                # Preserve explicit required attr for template-side rendering consistency.
                 'required': 'true',
                 'placeholder': 'domain name here',
             },
@@ -73,7 +69,6 @@ class SiteCreateForm(forms.ModelForm):
         fields = [
             'site_name',
             'project',
-            'site_name',
             'site_url',
             'web_provider',
             'site_id',
@@ -104,8 +99,6 @@ class SiteCreateForm(forms.ModelForm):
                     'placeholder': 'Any notes or additional items to scrape, please specify here',
                 }
             ),
-            # 'status': forms.TextInput(attrs={'hidden': ''}),
-            # 'category': forms.CheckboxInput(attrs={'checked': 'true'}),
         }
         labels = {
             'site_name': 'Site Name | Dealership',
@@ -129,9 +122,3 @@ class SiteCreateForm(forms.ModelForm):
             'images': 'images',
             'images_count': 'images count',
         }
-
-
-# display manually:
-# <label for="{{form.site_url.label}}">
-# name="{{form.site_url.name}}" id="{{form.site_url.auto_id}}"
-# <small class="text-danger" >{{form.site_url.errors|striptags}}</small>

@@ -1,4 +1,3 @@
-import json
 from urllib.parse import urlparse
 
 import scrapy
@@ -6,11 +5,11 @@ from scrapy.loader import ItemLoader
 from scrapy.utils.project import get_project_settings
 
 from ..items import ScrapebucketItem
+from ..spider_helpers.response_json import loads_response_body
 
 
 class SeowindsorSpider(scrapy.Spider):
     name = 'seowindsor'
-    # allowed_domains = []
     domain_name = ''
 
     custom_settings = {
@@ -20,28 +19,30 @@ class SeowindsorSpider(scrapy.Spider):
     def start_requests(self):
         self.domain_name = '.'.join(urlparse(self.url).netloc.split('.')[-2:])
 
+        ua = get_project_settings().get('USER_AGENT')
+        headers = {'User-Agent': ua} if ua else {}
+
         yield scrapy.Request(
             url='https://darrylfrith.com/mkf/api/2022/api/inventory/0/NEW',
             callback=self.parse,
-            headers={
-                'User-Agent': get_project_settings().get('USER_AGENT'),
-            },
+            headers=headers,
         )
         yield scrapy.Request(
             url='https://darrylfrith.com/mkf/api/2022/api/inventory/0/USED',
             callback=self.parse,
-            headers={
-                'User-Agent': get_project_settings().get('USER_AGENT'),
-            },
+            headers=headers,
         )
 
     def parse(self, response):
-        resp = json.loads(response.body)
+        resp = loads_response_body(
+            response.body, url=response.url, label=self.name
+        )
+        if not resp:
+            return
 
-        units = resp.get('results')
+        units = resp.get('results') or []
 
         for unit in units:
-
             loader = ItemLoader(item=ScrapebucketItem())
             loader.add_value('category', unit.get('condition'))
             loader.add_value('year', unit.get('year'))
@@ -50,13 +51,26 @@ class SeowindsorSpider(scrapy.Spider):
             loader.add_value('trim', unit.get('trim'))
             loader.add_value('stock_number', unit.get('stock_id'))
             loader.add_value('vin', unit.get('vin'))
-            loader.add_value('vehicle_url', f'{self.url}/inventory/listings/{unit.get("condition").lower()}?stockID={unit.get("stock_id")}')
+
+            cond = unit.get('condition')
+            stock_id = unit.get('stock_id')
+            if cond and stock_id:
+                loader.add_value(
+                    'vehicle_url',
+                    f'{self.url}/inventory/listings/{cond.lower()}?stockID={stock_id}',
+                )
+
             loader.add_value('price', unit.get('retail_price'))
             loader.add_value('selling_price', unit.get('sale_price'))
-            loader.add_value(
-                'image_urls', '|'.join([f'https://darrylfrith.com/mkf/api/uploadedImages/{url.get("image_key")}' for url in unit.get('images')])
-            )
-            loader.add_value('images_count', len(unit.get('images')))
+
+            images = unit.get('images') or []
+            image_urls = [
+                f'https://darrylfrith.com/mkf/api/uploadedImages/{url.get("image_key")}'
+                for url in images
+                if isinstance(url, dict) and url.get('image_key')
+            ]
+            loader.add_value('image_urls', '|'.join(image_urls))
+            loader.add_value('images_count', len(image_urls))
             loader.add_value('domain', self.domain_name)
 
             yield loader.load_item()

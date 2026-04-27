@@ -1,6 +1,8 @@
 from django.contrib.auth.models import User
 from django.db import models
-from django.urls import reverse, reverse_lazy
+from django.urls import reverse
+
+from webscraping.constants import DEFAULT_PROJECT_LIST_SLUG
 
 
 class Project(models.Model):
@@ -86,15 +88,17 @@ class TargetSite(models.Model):
     def __str__(self):
         return str(self.site_name) or ''
 
-    #  reverse return the full url as a string for creating site view or use  get_success_url(self) at CBV
     def get_absolute_url(self):
-        """must follow and return the set url pattern i,e :
-        project/<project_name>/<str:pk>/
-
-        reverse(*args,**kwargs) is same as reverse_lazy(*args,**kwargs). Example:
-            reverse_lazy('site-detail', kwargs={'project_name': self.project, 'pk': self.pk})
-        """
-        return reverse('site-detail', kwargs={'project_name': self.project, 'pk': self.pk})
+        """Match ``project/<project_name>/<str:pk>/`` using the project slug, not the model instance."""
+        project_name = (
+            self.project.name
+            if self.project_id and getattr(self.project, 'name', None)
+            else DEFAULT_PROJECT_LIST_SLUG
+        )
+        return reverse(
+            'site-detail',
+            kwargs={'project_name': project_name, 'pk': self.pk},
+        )
 
     # def save(self, force_insert=False, force_update=False):
     #     self.entry_code = ''

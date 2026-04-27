@@ -1,74 +1,65 @@
-# Define here the models for your spider middleware
-#
-# See documentation in:
-# https://docs.scrapy.org/en/latest/topics/spider-middleware.html
+"""
+Scrapy downloader/spider middlewares and Selenium integration.
+
+Side effect on import: configures ``sys.path``, ``DJANGO_SETTINGS_MODULE``, and calls
+``django.setup()`` so ORM models (``runspider``) resolve. Spiders using Playwright/async
+rely on ``DJANGO_ALLOW_ASYNC_UNSAFE`` (documented Django limitation for mixed sync ORM).
+"""
+
+from __future__ import annotations
 
 import csv
 import io
 import logging
 import os
 import sys
-from ftplib import FTP
-from functools import reduce
+from ftplib import FTP, error_perm
+from importlib import import_module
 from pathlib import Path
 
 import django
 import pytz
-
-# useful for handling different item types with a single interface
-from itemadapter import ItemAdapter, is_item
 from scrapy import signals
 
-sys.path.append(os.path.join(Path(__file__).parents[3], 'webscraping'))
-os.environ['DJANGO_SETTINGS_MODULE'] = 'webscraping.settings'
-# Django: SynchronousOnlyOperation: You cannot call this from an async context - use a thread or sync_to_async
-# use: os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
-os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
+logger = logging.getLogger(__name__)
+
+# Project root = parent of ``scrapebucket/`` package (directory that contains ``manage.py``).
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+_root = str(_PROJECT_ROOT)
+if _root not in sys.path:
+    sys.path.insert(0, _root)
+
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'webscraping.settings')
+# Allows synchronous ORM access from spider_closed and similar hooks when Twisted/async
+# handlers are present elsewhere in the stack (use sync_to_async in new code if possible).
+os.environ['DJANGO_ALLOW_ASYNC_UNSAFE'] = 'true'
 django.setup()
 
-from runspider import SpiderLog, TargetSite
+from project.models import SpiderLog, TargetSite
+
+import undetected_chromedriver as uc
+from scrapy_selenium.middlewares import SeleniumMiddleware
+from selenium_stealth import stealth
 
 
 class ScrapebucketSpiderMiddleware:
-    # Not all methods need to be defined. If a method is not defined,
-    # scrapy acts as if the spider middleware does not modify the
-    # passed objects.
-
     @classmethod
     def from_crawler(cls, crawler):
-        # This method is used by Scrapy to create your spiders.
-        s = cls()
-        crawler.signals.connect(s.spider_opened, signal=signals.spider_opened)
-        return s
+        o = cls()
+        crawler.signals.connect(o.spider_opened, signal=signals.spider_opened)
+        return o
 
     def process_spider_input(self, response, spider):
-        # Called for each response that goes through the spider
-        # middleware and into the spider.
-
-        # Should return None or raise an exception.
         return None
 
     def process_spider_output(self, response, result, spider):
-        # Called with the results returned from the Spider, after
-        # it has processed the response.
-
-        # Must return an iterable of Request, or item objects.
         for i in result:
             yield i
 
     def process_spider_exception(self, response, exception, spider):
-        # Called when a spider or process_spider_input() method
-        # (from other spider middleware) raises an exception.
-
-        # Should return either None or an iterable of Request or item objects.
         pass
 
     def process_start_requests(self, start_requests, spider):
-        # Called with the start requests of the spider, and works
-        # similarly to the process_spider_output() method, except
-        # that it doesn’t have a response associated.
-
-        # Must return only requests (not items).
         for r in start_requests:
             yield r
 
@@ -77,68 +68,28 @@ class ScrapebucketSpiderMiddleware:
 
 
 class ScrapebucketDownloaderMiddleware:
-    # Not all methods need to be defined. If a method is not defined,
-    # scrapy acts as if the downloader middleware does not modify the
-    # passed objects.
-
     @classmethod
     def from_crawler(cls, crawler):
-        # This method is used by Scrapy to create your spiders.
-        s = cls()
-        crawler.signals.connect(s.spider_opened, signal=signals.spider_opened)
-        return s
+        o = cls()
+        crawler.signals.connect(o.spider_opened, signal=signals.spider_opened)
+        return o
 
     def process_request(self, request, spider):
-        # Called for each request that goes through the downloader
-        # middleware.
-
-        # Must either:
-        # - return None: continue processing this request
-        # - or return a Response object
-        # - or return a Request object
-        # - or raise IgnoreRequest: process_exception() methods of
-        #   installed downloader middleware will be called
         return None
 
     def process_response(self, request, response, spider):
-        # Called with the response returned from the downloader.
-
-        # Must either;
-        # - return a Response object
-        # - return a Request object
-        # - or raise IgnoreRequest
         return response
 
     def process_exception(self, request, exception, spider):
-        # Called when a download handler or a process_request()
-        # (from other downloader middleware) raises an exception.
-
-        # Must either:
-        # - return None: continue processing this exception
-        # - return a Response object: stops process_exception() chain
-        # - return a Request object: stops process_exception() chain
         pass
 
     def spider_opened(self, spider):
         spider.logger.info('Spider opened: %s' % spider.name)
 
 
-# Stealth-Selenium
-
-from importlib import import_module
-from shutil import which
-
-import undetected_chromedriver as uc
-from scrapy_selenium.middlewares import SeleniumMiddleware
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.service import Service as ChromeService
-from selenium_stealth import stealth
-from webdriver_manager.chrome import ChromeDriverManager
-
-
 class SeleniumStealthMiddleware(SeleniumMiddleware):
+    """scrapy-selenium driver with selenium-stealth applied (legacy Chrome options)."""
+
     def __init__(
         self,
         driver_name,
@@ -155,7 +106,6 @@ class SeleniumStealthMiddleware(SeleniumMiddleware):
         driver_options_klass = getattr(driver_options_module, 'Options')
 
         driver_options = driver_options_klass()
-        # driver_options = uc.ChromeOptions()
 
         if browser_executable_path:
             driver_options.binary_location = browser_executable_path
@@ -168,30 +118,28 @@ class SeleniumStealthMiddleware(SeleniumMiddleware):
         }
 
         driver_options.add_argument('--headless')
-        driver_options.add_argument("--disable-blink-features=AutomationControlled")
-        # driver_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-        # driver_options.add_experimental_option('useAutomationExtension', False)
+        driver_options.add_argument('--disable-blink-features=AutomationControlled')
         driver_options.add_argument('--disable-dev-shm-usage')
         driver_options.add_argument('--no-sandbox')
         driver_options.add_argument('--disable-gpu')
         driver_options.add_argument('--incognito')
 
-        # stealth
         self.driver = driver_klass(**driver_kwargs)
 
         stealth(
             self.driver,
-            languages=["en-US", "en"],
+            languages=['en-US', 'en'],
             vendor='Google Inc.',
             platform='Win32',
             webgl_vendor='Intel Inc.',
-            renderer="Intel Iris OpenGL Engine",
+            renderer='Intel Iris OpenGL Engine',
             fix_hairline=True,
         )
 
 
-# undetected_chromedriver setup for linux only
 class UndetectedChromeDriver(SeleniumMiddleware):
+    """Headless undetected-chromedriver (minimal options; expand per deployment)."""
+
     def __init__(
         self,
         driver_name,
@@ -202,22 +150,20 @@ class UndetectedChromeDriver(SeleniumMiddleware):
         options = uc.ChromeOptions()
         options.headless = False
         options.add_argument('--headless')
-        self.driver = uc.Chrome()
+        self.driver = uc.Chrome(options=options)
 
 
-# Custom Middlewares
+class JobStatLogsMiddleware:
+    """On spider close, persist crawl stats to ``SpiderLog`` for the target site."""
 
-
-# Log Stats
-class JobStatLogsMiddleware(object):
-    def __init__(self, stats):
-        self.stats = stats
+    def __init__(self, crawler):
+        self.stats = crawler.stats
 
     @classmethod
     def from_crawler(cls, crawler):
-        s = cls(crawler)
-        crawler.signals.connect(s.spider_closed, signal=signals.spider_closed)
-        return s
+        o = cls(crawler)
+        crawler.signals.connect(o.spider_closed, signal=signals.spider_closed)
+        return o
 
     def spider_closed(self, spider, reason):
         stats = spider.crawler.stats.get_stats()
@@ -225,54 +171,38 @@ class JobStatLogsMiddleware(object):
 
         domain_name = spider.domain_name.split('.')[0]
 
+        target = TargetSite.objects.filter(site_id__exact=domain_name).first()
+        if target is None:
+            logger.warning(
+                'JobStatLogsMiddleware: no TargetSite for site_id=%r; skip SpiderLog',
+                domain_name,
+            )
+            return
+
         try:
-            target_site_pk = (
-                TargetSite.objects.filter(site_id__exact=domain_name).first().pk
+            job_logs = {
+                'target_site_id': target.pk,
+                'spider_name': spider.name,
+                'allowed_domain': domain_name,
+                'items_scraped': stats.get('item_scraped_count'),
+                'items_dropped': stats.get('item_dropped_count'),
+                'finish_reason': stats.get('finish_reason'),
+                'request_count': stats.get('downloader/request_count'),
+                'status_count_200': stats.get('downloader/response_status_count/200'),
+                'start_timestamp': stats.get('start_time'),
+                'end_timestamp': stats.get('finish_time'),
+                'elapsed_time': self.dt_interval(stats.get('elapsed_time_seconds')),
+                'elapsed_time_seconds': stats.get('elapsed_time_seconds'),
+            }
+            SpiderLog(**job_logs).save()
+            logger.info(
+                'Crawl finished: bot=%s spider=%s target=%s',
+                bot_name,
+                spider.name,
+                domain_name,
             )
-
-            job_logs = {}
-            job_logs['target_site_id'] = target_site_pk
-            job_logs['spider_name'] = spider.name
-            job_logs['allowed_domain'] = domain_name
-            job_logs['items_scraped'] = stats.get('item_scraped_count')
-            job_logs['items_dropped'] = stats.get('item_dropped_count')
-            job_logs['finish_reason'] = stats.get('finish_reason')
-            job_logs['request_count'] = stats.get('downloader/request_count')
-            job_logs['status_count_200'] = stats.get(
-                'downloader/response_status_count/200'
-            )
-            job_logs['start_timestamp'] = stats.get('start_time')
-            job_logs['end_timestamp'] = stats.get('finish_time')
-            job_logs['elapsed_time'] = self.dt_interval(
-                stats.get('elapsed_time_seconds')
-            )
-            job_logs['elapsed_time_seconds'] = stats.get('elapsed_time_seconds')
-
-            logs = SpiderLog(**job_logs)
-            logs.save()
-
-            print(
-                {
-                    'REMARK': 'Done Crawling',
-                    'BOT': bot_name,
-                    'SPIDER': spider.name,
-                    'TARGET_SITE': domain_name,
-                }
-            )
-            # send to ftp server thru middleware_ftp
-        except AttributeError:
-            pass
-
-        # def elapsed_time():
-        #     return [e.get('elapsed_time_seconds') for e in spider_stats[0]]
-
-        # total_elapsed = reduce(lambda acc, cur: acc + cur, elapsed_time(), 0)
-
-        # summary_stats = {
-        #     'total_spiders': len(elapsed_time()),
-        #     'total_elapsed_time': self.dt_interval(total_elapsed),
-        #     'average_elapsed_time': self.dt_interval(total_elapsed / len(elapsed_time())),
-        # }
+        except Exception as exc:
+            logger.exception('JobStatLogsMiddleware: failed to save SpiderLog: %s', exc)
 
     def convert_dt(self, dt):
         return (
@@ -280,44 +210,54 @@ class JobStatLogsMiddleware(object):
             .astimezone(pytz.timezone('US/Eastern'))
             .strftime('%Y-%m-%d %I:%M:%S')
         )
-        # pytz.utc.localize(datetime.utcnow()).astimezone(pytz.timezone('US/Pacific'))
-        # pytz.utc.localize(dt).astimezone(pytz.timezone('US/Pacific')).strftime("%Y-%m-%d %I:%M:%S %p") <-- with AM/ PM
 
     def dt_interval(self, s):
+        if s is None:
+            return '00:00:00'
         hours, remainder = divmod(s, 3600)
         minutes, seconds = divmod(remainder, 60)
         return '{:02}:{:02}:{:02}'.format(int(hours), int(minutes), int(seconds))
 
 
-# FTP VDP URLS
-class VdpUrlsMiddleWare(object):
-    def __init__(self, crawler):  # or __(self,stats)
+class VdpUrlsMiddleWare:
+    """After crawl: export VIN/VDP rows for this site to FTP as ``VDP_URLS_{site_id}.csv``."""
+
+    def __init__(self, crawler):
         self.crawler = crawler
 
     @classmethod
     def from_crawler(cls, crawler):
-        s = cls(crawler)
-        crawler.signals.connect(s.spider_closed, signal=signals.spider_closed)
-        return s
+        o = cls(crawler)
+        crawler.signals.connect(o.spider_closed, signal=signals.spider_closed)
+        return o
 
     def spider_closed(self, spider, reason):
         domain_name = spider.domain_name.split('.')[0]
         self.send_to_ftp(domain_name, spider)
 
     def send_to_ftp(self, pk, spider):
-        try:
-            scrapes = TargetSite.objects.filter(site_id=pk).first().scrapes.all()
-        except AttributeError:
+        target = TargetSite.objects.filter(site_id=pk).first()
+        if target is None:
+            logger.warning(
+                'VdpUrlsMiddleWare: no TargetSite for site_id=%r; skip FTP export',
+                pk,
+            )
+            return
+
+        host = os.environ.get('AIM_FTP_HOST')
+        user = os.environ.get('AIM_FTP_USER')
+        password = os.environ.get('AIM_FTP_PASS')
+        if not all((host, user, password)):
+            logger.warning(
+                'VdpUrlsMiddleWare: AIM_FTP_* env vars not set; skip FTP export',
+            )
             return
 
         csvfile = io.StringIO()
-        writer = csv.writer(csvfile)
-
         fieldnames = ['VIN', 'VDP URLS']
-        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)  # quoting=csv.QUOTE_ALL
-
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
         writer.writeheader()
-        for item in scrapes.values():
+        for item in target.scrapes.values():
             writer.writerow(
                 {
                     'VIN': item.get('vin'),
@@ -325,10 +265,19 @@ class VdpUrlsMiddleWare(object):
                 }
             )
 
-        ftp = FTP(os.environ.get('AIM_FTP_HOST'))
-        ftp.login(os.environ.get('AIM_FTP_USER'), os.environ.get('AIM_FTP_PASS'))
+        payload = io.BytesIO(csvfile.getvalue().encode('utf-8'))
+        remote = f'VDP_URLS_{pk}.csv'
 
-        ftp.storbinary(
-            f'STOR VDP_URLS_{pk}.csv', io.BytesIO(csvfile.getvalue().encode())
-        )
-        print(f'SENT TO FTP: VDP_URLS_{pk}.csv')
+        ftp = FTP()
+        try:
+            ftp.connect(host, int(os.environ.get('AIM_FTP_PORT', '21')))
+            ftp.login(user, password)
+            ftp.storbinary(f'STOR {remote}', payload)
+            logger.info('VdpUrlsMiddleWare: uploaded %s', remote)
+        except (OSError, error_perm) as exc:
+            logger.error('VdpUrlsMiddleWare: FTP upload failed: %s', exc)
+        finally:
+            try:
+                ftp.quit()
+            except Exception:
+                ftp.close()

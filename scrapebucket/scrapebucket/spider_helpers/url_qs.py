@@ -1,46 +1,56 @@
-import os
+"""
+URL/query helpers for spiders (Convertus VMS and domain utilities).
+
+Depends on Django ORM via ``ensure_django()`` for ``TargetSite`` lookups.
+"""
+
+from __future__ import annotations
+
 import re
-import sys
-from pathlib import Path
-from urllib.parse import parse_qs, urlencode, urlparse
+from urllib.parse import urlencode
 
-import django
+from ..django_setup import ensure_django
 
-sys.path.append(os.path.join(Path(__file__).parents[4], 'webscraping'))
-os.environ['DJANGO_SETTINGS_MODULE'] = 'webscraping.settings'
-django.setup()
+ensure_django()
 
 from project.models import TargetSite
 
 
-def get_company_id(domain):
+def get_company_id(domain: str) -> str | None:
+    """Return ``TargetSite.feed_id`` for a site id / domain key, or ``None``."""
     try:
-        company_id = TargetSite.objects.get(site_id=domain).feed_id
+        return TargetSite.objects.get(site_id=domain).feed_id
     except TargetSite.DoesNotExist:
-        company_id = None
-    return company_id
+        return None
 
 
-# previous method at server-side access to PHP file
-def parse_trader_url(url, id, page, num):
+def parse_trader_url(url: str, id_: str, page: int, num: int) -> str:
+    """Legacy PHP proxy URL for Convertus VMS (server-side plugin endpoint)."""
     parsed_qs = {
         'endpoint': [
-            f'https://vms.prod.convertus.rocks/api/filtering/?cp={id}&ln=en&pg={page}&pc={num}'
+            f'https://vms.prod.convertus.rocks/api/filtering/?cp={id_}&ln=en&pg={page}&pc={num}'
         ],
         'action': ['vms_data'],
     }
-    encoded_qs = urlencode(parsed_qs, doseq=1)
-    new_url = f'{url}wp-content/plugins/convertus-vms/include/php/ajax-vehicles.php?{encoded_qs}'
-    return new_url
+    encoded_qs = urlencode(parsed_qs, doseq=True)
+    return (
+        f'{url}wp-content/plugins/convertus-vms/include/php/ajax-vehicles.php?'
+        f'{encoded_qs}'
+    )
 
 
-# current method via direct API
-def access_trader_direct_API(id, page, num):
-    url_api = f'https://vms.prod.convertus.rocks/api/filtering/?cp={id}&ln=en&pg={page}&pc={num}'
-    return url_api
+def access_trader_direct_api(id_: str, page: int, num: int) -> str:
+    """Direct Convertus VMS filtering API URL (preferred over ``parse_trader_url``)."""
+    return (
+        f'https://vms.prod.convertus.rocks/api/filtering/'
+        f'?cp={id_}&ln=en&pg={page}&pc={num}'
+    )
 
 
-def keep_top_lvl_domain(dname):
-    # Use regular expression to replace all but the last dot with an empty string
-    modified_string = re.sub(r'\.(?=[^.]*\.)', '', dname)
-    return modified_string
+# Backwards-compatible alias (historical typo: API vs Api).
+access_trader_direct_API = access_trader_direct_api
+
+
+def keep_top_lvl_domain(dname: str) -> str:
+    """Collapse subdomain labels so only the registrable-style host remains."""
+    return re.sub(r'\.(?=[^.]*\.)', '', dname)

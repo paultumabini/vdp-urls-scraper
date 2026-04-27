@@ -1,3 +1,5 @@
+"""Dealer Inspire: sitemap table → Selenium VDPs (undetected Chrome for bot-heavy pages)."""
+
 from urllib.parse import urlparse
 
 import scrapy
@@ -9,8 +11,14 @@ from ..items import ScrapebucketItem
 
 
 class DealerinspireSpider(scrapy.Spider):
+    """
+    Starts from the inventory sitemap (tabular links), then loads each VDP in a real browser.
+
+    VDP markup varies (classic vs. alternate price/stock blocks); we try both and merge
+    gallery sources (lazy ``data-src`` plus immediate ``src``).
+    """
+
     name = 'dealerinspire'
-    # allowed_domains = []
     domain_name = ''
 
     custom_settings = {
@@ -27,15 +35,18 @@ class DealerinspireSpider(scrapy.Spider):
 
     def parse(self, response):
         unit_urls = LinkExtractor(restrict_xpaths='//td/a').extract_links(response)
-        for url in unit_urls:
+        for link in unit_urls:
+            if not link.url:
+                continue
             yield SeleniumRequest(
-                url=f'{url.url}',
+                url=link.url,
                 callback=self.parse_data,
             )
 
     def parse_data(self, response):
-
         category = 'used' if 'used' in response.url else 'new'
+
+        # Swiper-based gallery: collect both attributes; lazy load often fills data-src later.
         images = [
             response.xpath(
                 '//div[@class="swiper-container vdp-gallery-modal__main swiper-container-horizontal"]/div[@class="swiper-wrapper"]/div[contains(@class,"swiper-slide")]/img/@src'
@@ -48,18 +59,21 @@ class DealerinspireSpider(scrapy.Spider):
         as_unit = response.xpath('//div[@class="vdp-title__vehicle-info"]/h1/text()').get()
         price = (
             response.xpath('//span[@class="price"]/text()').get()
-            if response.xpath('//span[@class="price"]/text()').get()
-            else response.xpath('//span[@class="pricing-item__price "]/text()').get()
+            or response.xpath('//span[@class="pricing-item__price "]/text()').get()
         )
 
-        stock_number1 = response.xpath('//ul[@class="vdp-title__vin-stock"]/li[2]/span/../text()[2]').get()
-        vin1 = response.xpath('//ul[@class="vdp-title__vin-stock"]/li[1]/..//span[@id="vin"]/text()').get()
-
+        # Primary VIN/stock block vs. fallback spans (theme A/B).
+        stock_number1 = response.xpath(
+            '//ul[@class="vdp-title__vin-stock"]/li[2]/span/../text()[2]'
+        ).get()
+        vin1 = response.xpath(
+            '//ul[@class="vdp-title__vin-stock"]/li[1]/..//span[@id="vin"]/text()'
+        ).get()
         stock_number2 = response.xpath('(//span[@class="vinstock-number"]/text())[1]').get()
         vin2 = response.xpath('(//span[@class="vinstock-number"]/text())[2]').get()
 
-        stock_number = stock_number1 if stock_number1 else stock_number2
-        vin = vin1 if vin1 else vin2
+        stock_number = stock_number1 or stock_number2
+        vin = vin1 or vin2
 
         loader = ItemLoader(item=ScrapebucketItem(), selector=response, response=response)
         loader.add_value('stock_number', stock_number)
@@ -69,7 +83,11 @@ class DealerinspireSpider(scrapy.Spider):
         loader.add_value('category', category)
         loader.add_value('unit', as_unit)
         loader.add_value('price', price)
-        loader.add_value('image_urls', '|'.join([*images[0], *images[1]]))
-        loader.add_value('images_count', len([*images[0], *images[1]]))
+        src_imgs = images[0] if images else []
+        data_imgs = images[1] if len(images) > 1 else []
+        merged = [*(src_imgs or []), *(data_imgs or [])]
+        # Pipe-separated for pipelines that expect a single string field.
+        loader.add_value('image_urls', '|'.join(merged))
+        loader.add_value('images_count', len(merged))
 
         yield loader.load_item()

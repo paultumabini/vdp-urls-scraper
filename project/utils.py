@@ -11,14 +11,16 @@ from .models import Project
 
 
 class ScrapeEntryCode:
-    project_all = Project.objects.all()
-
     def get_scrape_entry_code(self, form):
+        """
+        Build the next entry code for a project (e.g. `AIM001`).
+        """
+        project_all = Project.objects.all()
         codes = []
         max_num = 1
-        for p in self.project_all:
+        for p in project_all:
             if form.instance.project.name == p.name:
-                for code in self.project_all.filter(name=form.instance.project.name).first().projects.all():
+                for code in project_all.filter(name=form.instance.project.name).first().projects.all():
                     take_int = re.findall(r'[A-Za-z]+|\d+', code.entry_code)[-1]
                     codes.append(int(take_int))
 
@@ -32,6 +34,7 @@ class ScrapeEntryCode:
 
 
 def ajax_login_required(view_func):
+    """Return HTTP 401 for unauthenticated AJAX requests."""
     @functools.wraps(view_func)
     def wrapper(request, *args, **kwargs):
         if request.user.is_authenticated:
@@ -43,7 +46,6 @@ def ajax_login_required(view_func):
 
 class DateConverter:
     regex = '\d{4}-\d{1,2}-\d{1,2}'
-    format = '%Y-%m-%d'
 
     def to_python(self, value):
         return datetime.strptime(value, '%Y-%m-%d').date()
@@ -55,8 +57,8 @@ class DateConverter:
 register_converter(DateConverter, 'date')
 
 
-#  select sidebar submenu
 def sidebar_submenu_selected(context, project_name):
+    """Mutate context with active class for selected project submenu."""
     selected = {
         'aim-dealers': 'active-underline',
         'vdp-urls': 'active-underline',

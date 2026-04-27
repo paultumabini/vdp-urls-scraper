@@ -94,9 +94,10 @@ class ReynoldsSpider(scrapy.Spider):
             '//a[contains(@class, "pageItem next")]'
         )
 
-        if has_next_page:
+        next_href = has_next_page.xpath('.//@href').get() if has_next_page else None
+        if next_href:
             yield scrapy.Request(
-                url=has_next_page.xpath('.//@href').get(),
+                url=next_href,
                 callback=self.parse,
                 meta={
                     "playwright": True,

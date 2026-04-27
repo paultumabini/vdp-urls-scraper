@@ -1,3 +1,5 @@
+"""Lynx Digital / WooCommerce vehicle archive (product attributes table for VIN)."""
+
 from urllib.parse import urlparse
 
 import scrapy
@@ -11,7 +13,6 @@ from ..items import ScrapebucketItem
 
 class LynxdigitalSpider(CrawlSpider):
     name = 'lynxdigital'
-    # allowed_domains = []
     domain_name = ''
 
     custom_settings = {
@@ -20,13 +21,14 @@ class LynxdigitalSpider(CrawlSpider):
 
     def start_requests(self):
         self.domain_name = '.'.join(urlparse(self.url).netloc.split('.')[-2:])
-
         yield scrapy.Request(url=f'{self.url}vehicles/')
 
-    # vehicle urls
-    extractor1 = LinkExtractor(restrict_xpaths='//h3[starts-with(@class,"product-title")]/a')
-    # pagination urls
-    extractor2 = LinkExtractor(restrict_xpaths='//nav[@class="woocommerce-pagination"]/descendant::a[@class="next page-numbers"]')
+    extractor1 = LinkExtractor(
+        restrict_xpaths='//h3[starts-with(@class,"product-title")]/a'
+    )
+    extractor2 = LinkExtractor(
+        restrict_xpaths='//nav[@class="woocommerce-pagination"]/descendant::a[@class="next page-numbers"]'
+    )
 
     rules = (
         Rule(extractor1, callback='parse_item', follow=True),
@@ -39,20 +41,11 @@ class LynxdigitalSpider(CrawlSpider):
 
     def parse_item(self, response):
         loader = ItemLoader(item=ScrapebucketItem(), selector=response)
+        # VIN stored as a WooCommerce product attribute row (linked text in TD).
         loader.add_xpath(
-            'vin', '//tr[@class="woocommerce-product-attributes-item woocommerce-product-attributes-item--attribute_pa_vin"]/td/p/a/text()'
+            'vin',
+            '//tr[@class="woocommerce-product-attributes-item woocommerce-product-attributes-item--attribute_pa_vin"]/td/p/a/text()',
         )
         loader.add_value('vehicle_url', response.url)
-        # loader.add_value('category', response.url)
-        # loader.add_xpath('unit', '//h1[@itemprop ="name"]/text()')
-        # loader.add_xpath(
-        #     'stock_number',
-        #     '//tr[@class="woocommerce-product-attributes-item woocommerce-product-attributes-item--attribute_pa_stock-number"]/td/p/a/text()',
-        # )
-        # loader.add_xpath('price', '//span[@class="woocommerce-Price-currencySymbol"]/../text()')
-        # loader.add_xpath('image_urls', '//div[@data-thumb]/@data-thumb')
-        # loader.add_value('images_count', len(response.xpath('//div[@data-thumb]/@data-thumb').getall()))
-
         loader.add_value('domain', self.domain_name)
-
         yield loader.load_item()

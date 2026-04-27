@@ -1,172 +1,229 @@
 """
-    References:
-    `updated google sheets with data`
-    https://developers.google.com/sheets/api/quickstart/python
-    https://developers.google.com/identity/protocols/oauth2/service-account#python
-    https://developers.google.com/sheets/api/reference/rest
+Import dealer rows from a Google Sheet into ``AimDealer`` / ``Webprovider``.
+
+Run as a script (not imported by the web app):
+
+    DJANGO_SETTINGS_MODULE=webscraping.settings python -m project.api.gsapi
+
+Environment (optional overrides for defaults below):
+
+- ``GS_SERVICE_ACCOUNT_FILE`` — path to service account JSON.
+- ``GS_SPREADSHEET_ID`` — spreadsheet id.
+- ``GS_SHEET_RANGE`` — A1 range (default ``dealers_list!A2:T``).
+
+Requires VPN/network access to Google APIs; transport errors usually mean DNS or firewall.
 """
 
+from __future__ import annotations
 
-from project.models import AimDealer, Webprovider
-from django.contrib.auth.models import User
+import logging
 import os
 import re
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
 import django
 import numpy as np
 import pandas as pd
-import requests
 from django.db import IntegrityError
-# from django.utils import timezone
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
-# append path to the project dir
-sys.path.append(os.path.join(Path(__file__).parents[3], 'webscraping'))
+logger = logging.getLogger(__name__)
 
-os.environ['DJANGO_SETTINGS_MODULE'] = 'webscraping.settings'
-django.setup()
+_DEFAULT_SA_PATH = (
+    '/home/pt/Dev/Projects/django/aim/vdp/vdpimporthelper/vdpurls/utils/keys_gs.json'
+)
+_DEFAULT_SPREADSHEET_ID = '1UZ5V28_nCZaNLq9CITviqOzM0_5xpvjn3iSkvATC9LI'
+_DEFAULT_RANGE = 'dealers_list!A2:T'
+_SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
+_EXCLUDED_WEB_PROVIDERS = frozenset({'**AVO', None})
+
+
+def _bootstrap_django() -> None:
+    repo_webscraping = Path(__file__).resolve().parents[2]
+    if str(repo_webscraping) not in sys.path:
+        sys.path.insert(0, str(repo_webscraping))
+    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'webscraping.settings')
+    django.setup()
 
 
 class GsApiData:
-    def __init__(self, safile, scopes, ssid):
+    """Read normalized rows from Sheets and upsert dealers."""
+
+    def __init__(self, safile: str, scopes: list[str], ssid: str):
         self._SERVICE_ACCOUNT_FILE = safile
         self._SCOPES = scopes
         self._SPREADSHEET_ID = ssid
 
     @property
-    def serv_acct_file(self):
+    def serv_acct_file(self) -> str:
         return self._SERVICE_ACCOUNT_FILE
 
     @serv_acct_file.setter
-    def serv_acct_file(self, file):
+    def serv_acct_file(self, file: str) -> None:
         if not self._SERVICE_ACCOUNT_FILE:
             self._SERVICE_ACCOUNT_FILE = file
 
     @property
-    def scopes(self):
+    def scopes(self) -> list[str]:
         return self._SCOPES
 
     @scopes.setter
-    def scopes(self, scopes):
+    def scopes(self, scopes: list[str]) -> None:
         if not self._SCOPES:
             self._SCOPES = scopes
 
     @property
-    def ss_id(self):
+    def ss_id(self) -> str:
         return self._SPREADSHEET_ID
 
     @ss_id.setter
-    def ss_id(self, id):
+    def ss_id(self, id_: str) -> None:
         if not self._SPREADSHEET_ID:
-            self._SPREADSHEET_ID = id
+            self._SPREADSHEET_ID = id_
 
     @classmethod
-    def from_get_credentials(cls, safile, scopes, ssid):
+    def from_get_credentials(cls, safile: str, scopes: list[str], ssid: str) -> GsApiData:
         return cls(safile, scopes, ssid)
 
     @classmethod
-    def access_gs_api(cls, creds=None, **kwargs):
+    def access_gs_api(
+        cls,
+        creds=None,
+        *,
+        range_a1: str = _DEFAULT_RANGE,
+        **kwargs,
+    ) -> list[dict] | None:
+        sa_path = kwargs['_SERVICE_ACCOUNT_FILE']
+        sheet_id = kwargs['_SPREADSHEET_ID']
+        sheet_scopes = kwargs['_SCOPES']
+
         if not creds:
             creds = service_account.Credentials.from_service_account_file(
-                kwargs['_SERVICE_ACCOUNT_FILE'], scopes=kwargs['_SCOPES'])
+                sa_path, scopes=sheet_scopes
+            )
+
+        from project.models import AimDealer
 
         try:
             service = build('sheets', 'v4', credentials=creds)
-
-            # Call the Sheets API
             sheet = service.spreadsheets()
-            # Read sheet values
-            result = sheet.values().get(spreadsheetId=kwargs['_SPREADSHEET_ID'], range='dealers_list!A2:T').execute()
+            result = sheet.values().get(
+                spreadsheetId=sheet_id,
+                range=range_a1,
+            ).execute()
             values = result.get('values', [])
 
-            # AimDealer.objects.all().delete()
-            # Webprovider.objects.all().delete()
-
-            # convert values into dataframe
             df = pd.DataFrame(values)
-            # target columns
-            df = df.iloc[:, np.r_[0:6]]
-            # replace all non trailing blank values created by GS API
-            # with null values
-            df_replace = df.replace([''], [None])
+            if df.empty:
+                logger.warning('Google Sheet range returned no rows.')
+                return None
 
-            # convert back to list to insert into Redshift
+            df = df.iloc[:, np.r_[0:6]]
+            df_replace = df.replace([''], [None])
             processed_dataset = df_replace.values.tolist()
 
-            # print(processed_dataset)
-
             if not processed_dataset:
-                print('No data found -', processed_dataset)
-                return
+                logger.warning('No data after normalizing sheet rows.')
+                return None
 
+            # Align with AimDealer columns (exclude trailing audit FKs, etc.).
             keys = [f.get_attname() for f in AimDealer._meta.fields][0:-4]
-
             list_of_dic = [dict(zip(keys, value)) for value in processed_dataset]
 
-            # filter out web_provider_id
-            # example web_provider_id != **AVO
-            excluded_value_list = ['**AVO', None]
-            filtered_list = [d for d in list_of_dic if d['web_provider_id'] not in excluded_value_list]
-
-            # print(filtered_list)
+            filtered_list = [
+                d
+                for d in list_of_dic
+                if d.get('web_provider_id') not in _EXCLUDED_WEB_PROVIDERS
+            ]
             return filtered_list
 
         except HttpError as err:
-            print(err)
+            logger.error('Google Sheets API error: %s', err)
+            return None
 
     @classmethod
-    def render_gs_data(cls, data):
+    def render_gs_data(cls, data: list[dict] | None) -> None:
+        if not data:
+            logger.warning('No rows to import.')
+            return
 
-        for data in [dic.items() for dic in data]:
+        from django.contrib.auth.models import User
+
+        from project.models import AimDealer, Webprovider
+
+        author = User.objects.order_by('pk').first()
+        created_count = 0
+        skipped = 0
+
+        for row in data:
             obj = {}
-
-            for key, value in data:
+            for key, value in row.items():
                 if key == 'web_provider_id':
-                    value = re.sub('[^A-Za-z0-9]+', '', value).lower() if value else 'WALA PA'
+                    slug = (
+                        re.sub('[^A-Za-z0-9]+', '', value).lower()
+                        if value
+                        else 'WALA PA'
+                    )
+                    Webprovider.objects.get_or_create(name=slug)
+                    obj[key] = slug
+                else:
+                    obj[key] = value
 
-                    # get or create additional web providers
-                    Webprovider.objects.get_or_create(name=value)
-                    # value = Webprovider.objects.filter(name=value).first().id
-
-                obj[key] = value
-
-            # `get_or_create` preserves if does exist otherwise create
-            # if Dealer is using custom pk, e.g. dealer_id if already existing and
-            # trying to save same id, it will throw error. use Object(**kwargs).save()
-            # instead to force save.
-
+            provider_name = obj.get('web_provider_id')
             try:
-                dealer, created = AimDealer.objects.get_or_create(
-                    account=obj.get('account'),
-                    dealer_id=obj.get('dealer_id'),
-                    dealer_name=obj.get('dealer_name'),
-                    site_url=obj.get('site_url'),
-                    web_provider=Webprovider.objects.get(name=obj.get('web_provider_id')),
-                    account_manager=obj.get('account_manager'),
-                    author=User.objects.first(),
+                wp = Webprovider.objects.get(name=provider_name)
+            except Webprovider.DoesNotExist:
+                logger.debug('Skip row: web provider %r missing.', provider_name)
+                skipped += 1
+                continue
+
+            dealer_id = obj.get('dealer_id')
+            if dealer_id is None:
+                skipped += 1
+                continue
+            try:
+                _, created = AimDealer.objects.get_or_create(
+                    dealer_id=dealer_id,
+                    defaults={
+                        'account': obj.get('account'),
+                        'dealer_name': obj.get('dealer_name'),
+                        'site_url': obj.get('site_url'),
+                        'web_provider': wp,
+                        'account_manager': obj.get('account_manager'),
+                        'author': author,
+                    },
                 )
-                print(dealer, created)
+                if created:
+                    created_count += 1
             except IntegrityError:
-                pass
+                skipped += 1
+                logger.debug(
+                    'IntegrityError for dealer_id=%s; skipped.',
+                    dealer_id,
+                )
+
+        logger.info(
+            'Sheet import finished: %s new dealers, %s rows skipped/errors.',
+            created_count,
+            skipped,
+        )
 
 
-gs = GsApiData
-safile = gs.serv_acct_file = '/home/pt/Dev/Projects/django/aim/vdp/vdpimporthelper/vdpurls/utils/keys_gs.json'
-scopes = gs.scopes = ['https://www.googleapis.com/auth/spreadsheets']
-ssid = gs.ss_id = '1UZ5V28_nCZaNLq9CITviqOzM0_5xpvjn3iSkvATC9LI'
-res = gs.from_get_credentials(safile, scopes, ssid)
-data = gs.access_gs_api(**vars(res))
-gs.render_gs_data(data)
+def main() -> None:
+    logging.basicConfig(level=logging.INFO, format='%(levelname)s %(message)s')
+    _bootstrap_django()
+
+    safile = os.environ.get('GS_SERVICE_ACCOUNT_FILE', _DEFAULT_SA_PATH)
+    ssid = os.environ.get('GS_SPREADSHEET_ID', _DEFAULT_SPREADSHEET_ID)
+    range_a1 = os.environ.get('GS_SHEET_RANGE', _DEFAULT_RANGE)
+
+    res = GsApiData.from_get_credentials(safile, _SCOPES, ssid)
+    data = GsApiData.access_gs_api(range_a1=range_a1, **vars(res))
+    GsApiData.render_gs_data(data)
 
 
-# !NOTE: ERRORS MAY OCCUR LIKE THIS BELOW. Please make sure outside VM VPN is OFF or internal nerwork is up and running
-# File
-# "/home/pt/Dev/Projects/django/aim/scrape/venv/lib/python3.11/site-packages/google_auth_httplib2.py",
-# line 126, in __call__    raise exceptions.TransportError(exc)
-# google.auth.exceptions.TransportError: Unable to find the server at
-# oauth2.googleapis.com
+if __name__ == '__main__':
+    main()

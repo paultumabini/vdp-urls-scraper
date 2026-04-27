@@ -1,8 +1,6 @@
 from django import forms
 from django.contrib import admin
-from rest_framework.authtoken.admin import (
-    TokenAdmin,
-)  # Don't remove this line! It's weird, but it prevents to register `Auth Token` twice
+from rest_framework.authtoken.admin import TokenAdmin  # noqa: F401
 from rest_framework.authtoken.models import Token, TokenProxy
 
 
@@ -29,9 +27,8 @@ class CustomTokenAdmin(admin.ModelAdmin):
 class AuthToken(Token):
     class Meta:
         proxy = True
-        # Rename `Tokens` label to something else
         verbose_name = 'Auth Token'
-        verbose_name_plural = 'Auth Tokens'  # default:r `Tokens`
+        verbose_name_plural = 'Auth Tokens'
 
 
 try:
@@ -39,5 +36,4 @@ try:
 except admin.sites.NotRegistered:
     pass
 
-# Register the custom TokenAdmin class
 admin.site.register(AuthToken, CustomTokenAdmin)

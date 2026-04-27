@@ -1,46 +1,52 @@
+"""
+Input processors for ``ScrapebucketItem`` (MapCompose chains in ``items.py``).
+
+These run on raw spider output before persistence; keep them tolerant of ``None``
+and non-string types where practical.
+"""
+
 import re
 from urllib.parse import urlparse
 
-"""
-The followings are custom item helper functions that filter, extract or clean items.
-"""
-
-# remove char in a string
+# Tokens stripped from stock / image fields (theme-specific noise).
+_STOCK_AND_IMAGE_NOISE = (
+    '-100x100',
+    'Stock:',
+    'Stock #:',
+    'Stock No:',
+    '-new',
+    '-167x93',
+    'thumb_',
+    '|',
+)
 
 
 def remove_char_from_str(val):
+    """Remove known thumbnail and label fragments from a string field."""
+    if val is None or not isinstance(val, str):
+        return val
     value = val
-    char = [
-        '-100x100',
-        'Stock:',
-        'Stock #:',
-        'Stock No:',
-        '-new',
-        '-167x93',
-        'thumb_',
-        '|',
-    ]
-    strings = []
-
-    for c in char:
-        if c in value:
-            strings.append(c)
-            for s in strings:
-                value = value.replace(s, '')
+    for token in _STOCK_AND_IMAGE_NOISE:
+        value = value.replace(token, '')
     return value
 
 
-# remove new line, tab and spaces
 def remove_trailing_spaces(value):
-    return (
-        re.sub(r'[\n\t]*', '', value).strip()
-        if bool(re.search(r'[\n\t]', value))
-        else value
-    )
+    """Collapse newlines/tabs when present; otherwise return unchanged."""
+    if value is None or not isinstance(value, str):
+        return value
+    if re.search(r'[\n\t]', value):
+        return re.sub(r'[\n\t]*', '', value).strip()
+    return value
 
 
-#  remove all non-numeric characters in a string (e.g: "Stock:", "Stock#:")
 def remove_non_numeric(value):
+    """
+    Strip non-digits for price-like fields.
+
+    Skips aggressive stripping when the string looks like a VIN fragment (``XB``,
+    ``U``/``N``) or a decimal, so we do not destroy identifiers by accident.
+    """
     if (
         isinstance(value, str)
         and 'XB' not in value
@@ -54,52 +60,50 @@ def remove_non_numeric(value):
     return 0 if not value or value == '' else value
 
 
-# extract vin from a url:
 def extract_vin(value):
-    value = (
-        re.sub(r'[\n\t/]*', '', value).strip()
-        if bool(re.search(r'[\n\t/]', value))
-        else value
-    )
-    xtract_vin = value.split('-')[-1] if len(value.split('-')[-1]) == 17 else value
+    """Best-effort VIN from messy text or slug-style URLs (last 17-char segment)."""
+    if value is None:
+        return value
+    if not isinstance(value, str):
+        value = str(value)
+    if re.search(r'[\n\t/]', value):
+        value = re.sub(r'[\n\t/]*', '', value).strip()
+    last_segment = value.split('-')[-1]
+    xtract_vin = last_segment if len(last_segment) == 17 else value
 
-    char = ['VIN', ':', 'VIN:']
-    strings = []
-    for c in char:
-        if c in xtract_vin:
-            strings.append(c)
-            for s in strings:
-                xtract_vin = xtract_vin.replace(s, '')
+    for noise in ('VIN', ':', 'VIN:'):
+        xtract_vin = xtract_vin.replace(noise, '')
     return xtract_vin
 
 
-# set category
 def set_category(value):
-    return (
-        'used' if 'used' in value.lower() else 'new' if 'new' in value.lower() else ''
-    )
+    if not value or not isinstance(value, str):
+        return ''
+    lower = value.lower()
+    if 'used' in lower:
+        return 'used'
+    if 'new' in lower:
+        return 'new'
+    return ''
 
 
-# vdp urls processing
 def extract_dname(url):
+    """Flatten hostname for legacy per-dealer URL hacks (see ``process_vdp_url``)."""
     p = urlparse(url)
-    domain = p.netloc  # example: gm.garymoe.com
-    replace = ['.', 'com', 'net', 'org']
-    for s in replace:
-        domain = domain.replace(s, '')  # 'gmgarymoe'
+    domain = p.netloc
+    for s in ('.', 'com', 'net', 'org'):
+        domain = domain.replace(s, '')
     return domain
 
 
 def process_vdp_url(url):
+    """Apply dealer-specific URL fixes before storage or comparison."""
+    if not url:
+        return url
     dn = extract_dname(url)
 
-    # Goal: it needs to insert '-' in between the last '//' for these target domains:
-    if dn in ['pothiermotors', 'eastviewchev', 'oldsgm']:
+    # Historic IIS/front-end quirk: insert '-' after scheme for these hosts.
+    if dn in ('pothiermotors', 'eastviewchev', 'oldsgm'):
         index = url.rfind('//') + 1
         return url[:index] + '-' + url[index:]
-    # Goal: 'https://kitchener.tabangimotors.com/vehicles/2022/Hyundai/Elantra/Kitchener/ON/60505383/?sale_class=Used
-    # Remove: vehicles/used/?view=grid&sc=used/
-    # if dn == 'kitchenertabangimotors':
-    #     scheme, dname, path, params, query, fragment = urlparse(url)
-    #     return f"{scheme}://{dname}/{query.replace('view=grid&sc=used/','')}"
     return url
