@@ -1,1 +1,0 @@
-[{"model": "project.project", "pk": 1, "fields": {"name": "aim-dealers", "date_created": "2022-04-16T04:12:25.283"}}, {"model": "project.project", "pk": 2, "fields": {"name": "others", "date_created": "2022-04-16T04:12:32.238"}}]
