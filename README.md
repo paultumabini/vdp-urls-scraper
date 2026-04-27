@@ -1,154 +1,115 @@
-# 🚀 VDP URL Scraper — Deployment Guide
+# VDP URL Scraper (Scrapes Bucket)
 
-This guide explains how to run the Django + Scrapy application locally.
+Django application for managing dealer **vehicle detail page (VDP)** scraping: target sites, spider templates, crawl stats, and a dashboard for monitoring scrape volume over time. Scrapy spiders live under `scrapebucket/` and persist results through Django pipelines.
 
-NOTE: For production deployment or EC2, please refer to guides for:
+![Dashboard: projects, sites, templates, YTD scrapes, and 15-day activity](docs/dashboard-screenshot.png)
 
-* Gunicorn + Nginx
-* Systemd services and timers
-* Production-ready cron jobs
+## Features
 
-It covers:
+- **Web dashboard** — KPIs (projects, sites, templates, scraped item counts), YTD template breakdown, recent scrape activity, and scraper elapsed-time trends.
+- **Many dealer templates** — 30+ Scrapy spiders (WordPress themes, Dealer Inspire, Trader/Convertus, JSON APIs, Selenium/Playwright where needed).
+- **REST API** — Supporting integrations under `project/api/`.
+- **Ops hooks** — Optional FTP export of VDP CSVs, crawl logging to the database, cron-friendly `runspider.py` entrypoint.
 
-* Installation
-* Environment variables
-* Django setup
-* Running Scrapy spiders
-* Cron scheduling
-* Logging
+## Stack
 
-## 1. 📁 Project Structure
+- Python 3.9+ (3.13 supported)
+- Django, Scrapy, Django REST Framework
+- PostgreSQL or SQLite (see settings)
+- Optional: Selenium / Playwright / undetected-chromedriver for specific spiders
+
+## Repository layout
 
 ```
-vdp-urls-scraper/
-├── fixtures/               # Initial Django data (users, projects, spiders, etc.)
-├── logs/                   # Log files for spider runs
+├── docs/                   # Project documentation assets (e.g. dashboard screenshot)
+├── fixtures/               # Sample / initial data
+├── logs/                   # Spider log output (create as needed)
 ├── project/                # Main Django app (models, views, admin, API, templates)
-├── scrapebucket/           # Scrapy project (settings, spiders, pipelines, utils)
-│   ├── spiders/            # All spider definitions (~30+ spiders)
-│   ├── spider_helpers/     # Selenium/Playwright helpers and URL parsing tools
-│   └── runspider.py        # Standalone spider runner for Scrapy
-├── static/                 # Static files (CSS, JS, images)
-├── users/                  # Authentication, profiles & user-related templates
-├── webscraping/            # Django project core (settings, wsgi, asgi)
-├── requirements.txt        # Python dependencies
-├── runspider.py            # Root-level runner for quick spider execution
-├── scrapy.cfg              # Scrapy config
-└── manage.py               # Django admin utility
+├── scrapebucket/           # Scrapy project
+│   └── scrapebucket/       # settings, spiders, pipelines, middlewares, helpers
+├── static/                 # CSS, JS
+├── users/                  # Auth and user-facing views
+├── webscraping/            # Django project (settings, URLs, WSGI/ASGI)
+├── manage.py
+├── runspider.py            # Twisted/Scrapy runner (sequential crawls from DB targets)
+├── scrapy.cfg
+└── requirements.txt
 ```
 
-## 2. 🧰 System Requirements
-* Python 3.9+
-* pip
-* virtualenv (recommended)
-* SQLite or PostgreSQL
+## Quick start (local)
 
-## 3. 🔽 Clone the Repository
-```
+### 1. Clone and virtualenv
+
+```bash
 git clone https://github.com/paultumabini/vdp-urls-scraper.git
 cd vdp-urls-scraper
+python3 -m venv venv
+source venv/bin/activate   # Windows: venv\Scripts\activate
+pip install -r requirements.txt
 ```
 
-## 4. 🧪 Python Virtual Environment (bash)
-Create venv
+### 2. Environment variables
 
-`python3 -m venv venv`
+For day-to-day **development**, you can rely on defaults in `webscraping/settings.py` (`DEBUG` defaults to `True` when `DJANGO_DEBUG` is unset). For **production**, set at least:
 
-Activate
+| Variable | Purpose |
+|----------|---------|
+| `DJANGO_DEBUG` | Set to `0` or `false` in production |
+| `DJANGO_SECRET_KEY` | Required when `DEBUG` is false (never use the repo fallback key) |
+| `DJANGO_ALLOWED_HOSTS` | Comma-separated hostnames |
+| `POSTGRES_*` / `DB_*` | See `settings.py` for database configuration |
+| `AIM_FTP_HOST`, `AIM_FTP_USER`, `AIM_FTP_PASS` | FTP export of VDP CSVs (optional locally) |
+| `AVAIM_*` / `GS_*` | External API integrations where used |
 
-`source venv/bin/activate`
+Example (optional shell file, e.g. `~/.envars`):
 
-Install dependencies
-
-`pip install -r requirements.txt`
-
-## 5. 🔐 Environment Variables (.envars)
-
-Create a file in your home directory:
-
-`nano ~/.envars`
-
-Example contents:
-```
-# Django
+```bash
 export DJANGO_SECRET_KEY="your-secret-key"
-export DATABASE_URL="sqlite:///db.sqlite3"
-
-# FTP server (required)
-export AIM_FTP_HOST=""
-export AIM_FTP_USER=""
-export AIM_FTP_PASS=""
-
-# AVAIM login (required)
-export AVAIM_EMAIL=""
-export AVAIM_PASS=""
+export DJANGO_DEBUG=1
+# export DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1
+# export AIM_FTP_HOST=...
+# export AIM_FTP_USER=...
+# export AIM_FTP_PASS=...
 ```
 
-Load the environment:
+### 3. Database and superuser
 
-`source ~/.envars`
-
-## 6. 🛠️ Django Setup (Local)
-
-Run migrations
-
-`venv/bin/python manage.py migrate`
-
-Create superuser (optional)
-
-`venv/bin/python manage.py createsuperuser`
-
-Run Django development server
-
-`venv/bin/python manage.py runserver`
-
-## 7. 🕷️ Running Scrapy Spiders
-
-All spiders are executed using the root spider runner:
-
-`python webscraping/runspider.py -s <spider_name>`
-
-Example:
-```
-venv/bin/python webscraping/runspider.py -s webstager
-venv/bin/python webscraping/runspider.py -s lynxdigital
+```bash
+venv/bin/python manage.py migrate
+venv/bin/python manage.py createsuperuser
+venv/bin/python manage.py runserver
 ```
 
-Run specific a site:
+Open the app (default: `http://127.0.0.1:8000/`) and `/admin/` as needed.
 
-`scrapy crawl <spider_name> -a url=<url>`
+## Running spiders
 
-Example:
+From the **repository root** (with Django/Scrapy environment and `DJANGO_SETTINGS_MODULE` available as in `runspider.py`):
 
-`scrapy crawl tadvantage -a url=https://www.example.com/`
+```bash
+# Run one spider name against all active targets that use it (see scrapebucket URLs helper)
+venv/bin/python runspider.py -s <spider_name>
 
-
-Logs will be saved in the `logs/` folder.
-
-## 8. 📅 Scheduling Spiders with Cron
-
-Create logs folder
-
-`mkdir -p logs`
-
-Edit crontab
-
-`crontab -e`
-
-Example cron configuration (run at 18:00)
+# Examples
+venv/bin/python runspider.py -s webstager
+venv/bin/python runspider.py -s all    # wipes all Scrape rows first, then runs every active target
 ```
-SHELL=/bin/bash
 
-ENVS=~/.envars
-SCRAPE_DIR=/path/to/vdp-urls-scraper
-PYTHON=$SCRAPE_DIR/venv/bin/python
-LOG_DIR=$SCRAPE_DIR/logs
-DATE_CMD="+%Y_%m_%d"
+Ad-hoc Scrapy invocation (single site), from the **repository root** (where `scrapy.cfg` lives):
 
-# Ensure logs folder exists
-1 0 * * * mkdir -p $LOG_DIR
-
-# Spiders
-0 18 * * * . $ENVS && $PYTHON $SCRAPE_DIR/webscraping/runspider.py -s webstager >> $LOG_DIR/webstager_$(date $DATE_CMD).log 2>&1
-0 18 * * * . $ENVS && $PYTHON $SCRAPE_DIR/webscraping/runspider.py -s lynxdigital >> $LOG_DIR/lynxdigital_$(date $DATE_CMD).log 2>&1
+```bash
+scrapy crawl <spider_name> -a url=https://www.example.com/
 ```
+
+Logs are typically written under `logs/` if you configure cron or wrappers to do so.
+
+## Production notes
+
+- Run Django behind **Gunicorn** (or uwsgi) and **Nginx** (or similar).
+- Use **systemd** or **cron** for scheduled `runspider.py` jobs; source the same env file as the web app.
+- Set **`DJANGO_DEBUG=0`**, a strong **`DJANGO_SECRET_KEY`**, and proper **`DJANGO_ALLOWED_HOSTS`** (avoid `*` in production).
+- See `webscraping/settings.py` for CORS, `REST_FRAMEWORK`, and storage options.
+
+## License / contact
+
+Project by **paultumabini** — [github.com/paultumabini/vdp-urls-scraper](https://github.com/paultumabini/vdp-urls-scraper).
