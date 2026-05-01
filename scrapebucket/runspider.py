@@ -1,23 +1,42 @@
-import argparse
-import os
-import sys
-from pathlib import Path
+"""
+Entry point for running Scrapy spiders against the AIM dealer database.
 
-# 1. Protect Reactor
+Usage::
+
+    python runspider.py --spider <domain>   # run one spider  (e.g. ``autojini``)
+    python runspider.py --spider all        # run every active spider sequentially
+
+Bootstrap order (order matters):
+  1. Install the asyncio Twisted reactor — must happen before any other Twisted import.
+  2. Bootstrap Django ORM via ``ensure_django()`` so models are available at import time
+     in middlewares and pipelines.
+  3. Import Scrapy/project modules that depend on the above.
+"""
+
+import argparse
+import sys
+
+# ---------------------------------------------------------------------------
+# 1. Reactor — install before *any* ``twisted.internet`` import elsewhere.
+#    Playwright and other async spiders require the asyncio-backed reactor.
+# ---------------------------------------------------------------------------
 from twisted.internet import asyncioreactor
-if "twisted.internet.reactor" not in sys.modules:
+
+if 'twisted.internet.reactor' not in sys.modules:
     asyncioreactor.install()
 
+# ---------------------------------------------------------------------------
+# 2. Django ORM bootstrap (idempotent; no-op if already called by settings.py).
+#    Locates manage.py, patches sys.path, sets DJANGO_SETTINGS_MODULE, and
+#    calls django.setup().
+# ---------------------------------------------------------------------------
+from scrapebucket.django_setup import ensure_django
 
-# 2. Setup environment (Keep this minimal)
-sys.path.append(os.path.join(Path(__file__).parents[0], 'scrapebucket'))
-sys.path.append(os.path.join(Path(__file__).parents[2], 'webscraping'))
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'webscraping.settings')
+ensure_django()
 
-import django
-django.setup()
-
-# 3. Standard Imports
+# ---------------------------------------------------------------------------
+# 3. Application imports — safe now that Twisted reactor and Django are ready.
+# ---------------------------------------------------------------------------
 from project.models import Scrape, TargetSite
 from scrapebucket.urls_crawl import match_spiders
 from scrapy.crawler import CrawlerRunner
@@ -25,17 +44,18 @@ from scrapy.utils.log import configure_logging
 from scrapy.utils.project import get_project_settings
 from twisted.internet import defer, reactor
 
-# Run spiders sequentially
 configure_logging()
 settings = get_project_settings()
 runner = CrawlerRunner(settings)
 
 
 @defer.inlineCallbacks
-def crawl(arg):
+def crawl(arg: str):
+    """Schedule spiders sequentially via ``CrawlerRunner``, then stop the reactor."""
     arg_l = arg.lower()
 
     if arg_l == 'all':
+        # Full re-crawl: wipe all previous scrape records first.
         Scrape.objects.all().delete()
         for spider, url, domain, status in match_spiders(TargetSite, settings):
             if status.lower() != 'active':
@@ -45,6 +65,7 @@ def crawl(arg):
         reactor.stop()
         return
 
+    # Single-spider mode: match by name, delete only that site's prior scrapes.
     for spider, url, domain, status in match_spiders(TargetSite, settings):
         if status.lower() != 'active':
             continue
@@ -60,19 +81,17 @@ def crawl(arg):
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='spider name')
+    parser = argparse.ArgumentParser(description='Run one or all active Scrapy spiders.')
     parser.add_argument(
         '-s',
         '--spider',
         type=str,
-        metavar='',
+        metavar='NAME',
         required=True,
-        help='specify the spider, i.e, the domain name',
+        help='Spider domain name (e.g. "autojini") or "all" to run every active spider.',
     )
     args = parser.parse_args()
 
     crawl(args.spider)
-    #the script will block here until the last crawl call is finished
-    reactor.run() 
-
-
+    # Blocks until the last crawl call completes and reactor.stop() is reached.
+    reactor.run()

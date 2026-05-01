@@ -37,8 +37,13 @@ def get_field_values(value, arg):
 
 @register.filter(name='convert_str_date')
 def convert_str_date(value):
-    if value:
-        return datetime.strptime(value, '%Y-%m-%d %H:%M:%S.%f')
+    if not value:
+        return None
+    try:
+        # fromisoformat handles the +00:00 suffix correctly
+        return datetime.fromisoformat(value.replace('Z', '+00:00'))
+    except (ValueError, TypeError):
+        return value
 
 
 @register.filter

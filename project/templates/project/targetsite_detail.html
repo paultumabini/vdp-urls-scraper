@@ -192,7 +192,7 @@
                     {% now 'm-d-Y'  as today %}                 
                     <a class="btn btn-success  btn__access download-btn2" href="{% url 'scrape-csv' object.project %}?target_id={{object.site_id}}">    
                         <span class="left2">Download</span>
-                        <span class="right2"><i class="fa fa-file-csv"></i></span>
+                        <span class="right2"><i class="fas fa-file-csv"></i></span>
                     </a>
                     <a class="btn btn-danger  btn__access delete-btn2 openDeleteModal" data-site-id="{{object.site_id}}" data-site-name="{{object.site_name}}" data-entry-code="{{object.entry_code}}">    
                         <span class="left2">Delete</span>

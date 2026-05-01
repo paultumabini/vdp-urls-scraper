@@ -48,3 +48,10 @@ SPIDER_MIDDLEWARES = {
     'scrapebucket.middlewares.JobStatLogsMiddleware': 300,
     'scrapebucket.middlewares.VdpUrlsMiddleWare': 300,
 }
+
+# --- Django bootstrap ---
+# Initialise Django here — the earliest point in Scrapy's load order — so that
+# middlewares and pipelines can import ORM models without each needing their own
+# setup block.  The helper is idempotent; repeat calls from those modules are no-ops.
+from scrapebucket.django_setup import ensure_django  # noqa: E402
+ensure_django()

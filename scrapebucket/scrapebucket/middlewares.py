@@ -1,9 +1,17 @@
 """
-Scrapy downloader/spider middlewares and Selenium integration.
+Scrapy downloader/spider middlewares and Selenium/Chrome driver integration.
 
-Side effect on import: configures ``sys.path``, ``DJANGO_SETTINGS_MODULE``, and calls
-``django.setup()`` so ORM models (``runspider``) resolve. Spiders using Playwright/async
-rely on ``DJANGO_ALLOW_ASYNC_UNSAFE`` (documented Django limitation for mixed sync ORM).
+Classes
+-------
+ScrapebucketSpiderMiddleware     — thin pass-through spider middleware (boilerplate)
+ScrapebucketDownloaderMiddleware — thin pass-through downloader middleware (boilerplate)
+SeleniumStealthMiddleware        — scrapy-selenium with selenium-stealth applied
+UndetectedChromeDriver           — scrapy-selenium wrapper using undetected-chromedriver
+JobStatLogsMiddleware            — persists crawl stats to ``SpiderLog`` on spider close
+VdpUrlsMiddleWare                — exports VIN/VDP CSV to FTP on spider close
+
+Django ORM is bootstrapped via ``ensure_django()`` (idempotent; a no-op when
+``settings.py`` has already called it).
 """
 
 from __future__ import annotations
@@ -12,37 +20,38 @@ import csv
 import io
 import logging
 import os
-import sys
 from ftplib import FTP, error_perm
 from importlib import import_module
-from pathlib import Path
 
-import django
 import pytz
-from scrapy import signals
-
-logger = logging.getLogger(__name__)
-
-# Project root = parent of ``scrapebucket/`` package (directory that contains ``manage.py``).
-_PROJECT_ROOT = Path(__file__).resolve().parents[2]
-_root = str(_PROJECT_ROOT)
-if _root not in sys.path:
-    sys.path.insert(0, _root)
-
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'webscraping.settings')
-# Allows synchronous ORM access from spider_closed and similar hooks when Twisted/async
-# handlers are present elsewhere in the stack (use sync_to_async in new code if possible).
-os.environ['DJANGO_ALLOW_ASYNC_UNSAFE'] = 'true'
-django.setup()
-
-from project.models import SpiderLog, TargetSite
-
 import undetected_chromedriver as uc
+from scrapy import signals
 from scrapy_selenium.middlewares import SeleniumMiddleware
 from selenium_stealth import stealth
 
+from scrapebucket.django_setup import ensure_django
+
+# Safety net: no-op when settings.py has already bootstrapped Django; ensures
+# the ORM is available if this module is ever imported in isolation.
+ensure_django()
+
+logger = logging.getLogger(__name__)
+
+from project.models import SpiderLog, TargetSite  # noqa: E402 — must follow ensure_django()
+
+
+# ---------------------------------------------------------------------------
+# Boilerplate middlewares (no custom logic; extend these as needed)
+# ---------------------------------------------------------------------------
 
 class ScrapebucketSpiderMiddleware:
+    """
+    Default spider middleware — currently a transparent pass-through.
+
+    All ``process_spider_*`` methods delegate straight to Scrapy's defaults.
+    Add custom item/request mutation or error handling here.
+    """
+
     @classmethod
     def from_crawler(cls, crawler):
         o = cls()
@@ -68,6 +77,13 @@ class ScrapebucketSpiderMiddleware:
 
 
 class ScrapebucketDownloaderMiddleware:
+    """
+    Default downloader middleware — currently a transparent pass-through.
+
+    All ``process_*`` methods delegate straight to Scrapy's defaults.
+    Add request signing, proxy rotation, or retry logic here.
+    """
+
     @classmethod
     def from_crawler(cls, crawler):
         o = cls()
@@ -87,8 +103,19 @@ class ScrapebucketDownloaderMiddleware:
         spider.logger.info('Spider opened: %s' % spider.name)
 
 
+# ---------------------------------------------------------------------------
+# Chrome / Selenium driver middlewares
+# ---------------------------------------------------------------------------
+
 class SeleniumStealthMiddleware(SeleniumMiddleware):
-    """scrapy-selenium driver with selenium-stealth applied (legacy Chrome options)."""
+    """
+    scrapy-selenium downloader middleware with ``selenium-stealth`` applied.
+
+    Builds the WebDriver via dynamic import (matching scrapy-selenium's own
+    pattern) so the driver name stays configurable via ``SELENIUM_DRIVER_NAME``.
+    Stealth patches navigator properties that headless Chrome normally exposes to
+    bot-detection scripts.
+    """
 
     def __init__(
         self,
@@ -99,11 +126,13 @@ class SeleniumStealthMiddleware(SeleniumMiddleware):
     ):
         webdriver_base_path = f'selenium.webdriver.{driver_name}'
 
-        driver_klass_module = import_module(f'{webdriver_base_path}.webdriver')
-        driver_klass = getattr(driver_klass_module, 'WebDriver')
-
-        driver_options_module = import_module(f'{webdriver_base_path}.options')
-        driver_options_klass = getattr(driver_options_module, 'Options')
+        # Dynamically load the WebDriver and Options classes for the configured browser.
+        driver_klass = getattr(
+            import_module(f'{webdriver_base_path}.webdriver'), 'WebDriver'
+        )
+        driver_options_klass = getattr(
+            import_module(f'{webdriver_base_path}.options'), 'Options'
+        )
 
         driver_options = driver_options_klass()
 
@@ -112,11 +141,7 @@ class SeleniumStealthMiddleware(SeleniumMiddleware):
         for argument in driver_arguments:
             driver_options.add_argument(argument)
 
-        driver_kwargs = {
-            'executable_path': driver_executable_path,
-            f'{driver_name}_options': driver_options,
-        }
-
+        # Anti-detection flags — must be set before the driver process starts.
         driver_options.add_argument('--headless')
         driver_options.add_argument('--disable-blink-features=AutomationControlled')
         driver_options.add_argument('--disable-dev-shm-usage')
@@ -124,8 +149,12 @@ class SeleniumStealthMiddleware(SeleniumMiddleware):
         driver_options.add_argument('--disable-gpu')
         driver_options.add_argument('--incognito')
 
-        self.driver = driver_klass(**driver_kwargs)
+        self.driver = driver_klass(
+            executable_path=driver_executable_path,
+            **{f'{driver_name}_options': driver_options},
+        )
 
+        # Patch JS navigator properties so the browser appears as a normal user agent.
         stealth(
             self.driver,
             languages=['en-US', 'en'],
@@ -138,23 +167,41 @@ class SeleniumStealthMiddleware(SeleniumMiddleware):
 
 
 class UndetectedChromeDriver(SeleniumMiddleware):
-    """Headless undetected-chromedriver (minimal options; expand per deployment)."""
+    """
+    scrapy-selenium wrapper using ``undetected-chromedriver``.
+
+    ``undetected-chromedriver`` patches the Chrome binary at runtime to remove
+    automation fingerprints; no manual stealth flags are required.
+
+    Note: the constructor signature matches scrapy-selenium's ``from_crawler``
+    factory but only ``options`` is used — the other arguments are intentionally
+    ignored because ``uc.Chrome`` manages its own executable path.
+    """
 
     def __init__(
         self,
-        driver_name,
-        driver_executable_path,
-        driver_arguments,
-        browser_executable_path,
+        driver_name,           # unused — uc always uses Chrome
+        driver_executable_path,  # unused — uc locates its own patched binary
+        driver_arguments,      # unused — add via options if needed
+        browser_executable_path,  # unused — uc manages the browser path
     ):
         options = uc.ChromeOptions()
-        options.headless = False
         options.add_argument('--headless')
         self.driver = uc.Chrome(options=options)
 
 
+# ---------------------------------------------------------------------------
+# Post-crawl stat / export middlewares (spider_closed signal handlers)
+# ---------------------------------------------------------------------------
+
 class JobStatLogsMiddleware:
-    """On spider close, persist crawl stats to ``SpiderLog`` for the target site."""
+    """
+    Persist Scrapy crawl statistics to ``SpiderLog`` when a spider closes.
+
+    Reads the final stats snapshot from ``spider.crawler.stats``, looks up the
+    ``TargetSite`` by ``spider.domain_name``, and writes one ``SpiderLog`` row.
+    Failures are caught and logged so a stats-save error never aborts a crawl.
+    """
 
     def __init__(self, crawler):
         self.stats = crawler.stats
@@ -168,7 +215,6 @@ class JobStatLogsMiddleware:
     def spider_closed(self, spider, reason):
         stats = spider.crawler.stats.get_stats()
         bot_name = spider.crawler.settings.get('BOT_NAME')
-
         domain_name = spider.domain_name.split('.')[0]
 
         target = TargetSite.objects.filter(site_id__exact=domain_name).first()
@@ -180,21 +226,20 @@ class JobStatLogsMiddleware:
             return
 
         try:
-            job_logs = {
-                'target_site_id': target.pk,
-                'spider_name': spider.name,
-                'allowed_domain': domain_name,
-                'items_scraped': stats.get('item_scraped_count'),
-                'items_dropped': stats.get('item_dropped_count'),
-                'finish_reason': stats.get('finish_reason'),
-                'request_count': stats.get('downloader/request_count'),
-                'status_count_200': stats.get('downloader/response_status_count/200'),
-                'start_timestamp': stats.get('start_time'),
-                'end_timestamp': stats.get('finish_time'),
-                'elapsed_time': self.dt_interval(stats.get('elapsed_time_seconds')),
-                'elapsed_time_seconds': stats.get('elapsed_time_seconds'),
-            }
-            SpiderLog(**job_logs).save()
+            SpiderLog(
+                target_site_id=target.pk,
+                spider_name=spider.name,
+                allowed_domain=domain_name,
+                items_scraped=stats.get('item_scraped_count'),
+                items_dropped=stats.get('item_dropped_count'),
+                finish_reason=stats.get('finish_reason'),
+                request_count=stats.get('downloader/request_count'),
+                status_count_200=stats.get('downloader/response_status_count/200'),
+                start_timestamp=stats.get('start_time'),
+                end_timestamp=stats.get('finish_time'),
+                elapsed_time=self.dt_interval(stats.get('elapsed_time_seconds')),
+                elapsed_time_seconds=stats.get('elapsed_time_seconds'),
+            ).save()
             logger.info(
                 'Crawl finished: bot=%s spider=%s target=%s',
                 bot_name,
@@ -205,6 +250,7 @@ class JobStatLogsMiddleware:
             logger.exception('JobStatLogsMiddleware: failed to save SpiderLog: %s', exc)
 
     def convert_dt(self, dt):
+        """Convert a naive UTC datetime to a US/Eastern formatted string (unused; kept for reference)."""
         return (
             pytz.utc.localize(dt)
             .astimezone(pytz.timezone('US/Eastern'))
@@ -212,6 +258,7 @@ class JobStatLogsMiddleware:
         )
 
     def dt_interval(self, s):
+        """Format elapsed seconds as ``HH:MM:SS``; returns ``'00:00:00'`` for ``None``."""
         if s is None:
             return '00:00:00'
         hours, remainder = divmod(s, 3600)
@@ -220,7 +267,15 @@ class JobStatLogsMiddleware:
 
 
 class VdpUrlsMiddleWare:
-    """After crawl: export VIN/VDP rows for this site to FTP as ``VDP_URLS_{site_id}.csv``."""
+    """
+    Export VIN/VDP URL pairs to FTP as ``VDP_URLS_{site_id}.csv`` on spider close.
+
+    Reads ``TargetSite.scrapes`` for the crawled domain, writes a two-column CSV
+    (``VIN``, ``VDP URLS``), and uploads it to the AIM FTP server.
+
+    Required env vars: ``AIM_FTP_HOST``, ``AIM_FTP_USER``, ``AIM_FTP_PASS``.
+    Optional:          ``AIM_FTP_PORT`` (defaults to ``21``).
+    """
 
     def __init__(self, crawler):
         self.crawler = crawler
@@ -248,22 +303,15 @@ class VdpUrlsMiddleWare:
         user = os.environ.get('AIM_FTP_USER')
         password = os.environ.get('AIM_FTP_PASS')
         if not all((host, user, password)):
-            logger.warning(
-                'VdpUrlsMiddleWare: AIM_FTP_* env vars not set; skip FTP export',
-            )
+            logger.warning('VdpUrlsMiddleWare: AIM_FTP_* env vars not set; skip FTP export')
             return
 
+        # Build CSV in-memory; encode to bytes for FTP binary transfer.
         csvfile = io.StringIO()
-        fieldnames = ['VIN', 'VDP URLS']
-        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        writer = csv.DictWriter(csvfile, fieldnames=['VIN', 'VDP URLS'])
         writer.writeheader()
         for item in target.scrapes.values():
-            writer.writerow(
-                {
-                    'VIN': item.get('vin'),
-                    'VDP URLS': item.get('vehicle_url'),
-                }
-            )
+            writer.writerow({'VIN': item.get('vin'), 'VDP URLS': item.get('vehicle_url')})
 
         payload = io.BytesIO(csvfile.getvalue().encode('utf-8'))
         remote = f'VDP_URLS_{pk}.csv'

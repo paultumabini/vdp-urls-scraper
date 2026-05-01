@@ -1,9 +1,12 @@
 """
-Initialize Django once for Scrapy code paths that use the ORM (e.g. ``TargetSite``).
+Initialize Django once for all Scrapy code paths that use the ORM.
 
-Walks parents of this file until ``manage.py`` is found, prepends that directory to
-``sys.path``, then runs ``django.setup()``. Safe to call from multiple helpers; the
-second call is a no-op.
+Walks parent directories until ``manage.py`` is found, prepends that directory to
+``sys.path``, sets required environment variables, then calls ``django.setup()``.
+
+Idempotent: subsequent calls are no-ops guarded by ``_CONFIGURED``.  Call sites
+(``settings.py``, middlewares, pipelines, ``runspider.py``) can all call
+``ensure_django()`` safely without risking double-initialisation.
 """
 
 from __future__ import annotations
@@ -16,7 +19,7 @@ _CONFIGURED = False
 
 
 def ensure_django() -> None:
-    """Add project root to ``sys.path`` and run ``django.setup()``."""
+    """Locate the Django project root, patch ``sys.path``, and run ``django.setup()``."""
     global _CONFIGURED
     if _CONFIGURED:
         return
@@ -36,10 +39,13 @@ def ensure_django() -> None:
 
     root_str = str(project_root)
     if root_str not in sys.path:
-        # Prepend so repo packages (e.g. ``webscraping``) win over same-named site-packages.
+        # Prepend so repo packages (e.g. ``webscraping``) shadow same-named site-packages.
         sys.path.insert(0, root_str)
 
     os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'webscraping.settings')
+    # Required for synchronous ORM access inside Twisted/async contexts (Playwright
+    # spiders, spider_closed signals).  Prefer sync_to_async in new code.
+    os.environ.setdefault('DJANGO_ALLOW_ASYNC_UNSAFE', 'true')
 
     import django
 
